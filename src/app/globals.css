@@ -1251,6 +1251,31 @@ input, select, textarea {
   flex: 1;
 }
 
+.card-page-btn {
+  opacity: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  transition: opacity 0.15s, background 0.12s, color 0.12s;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.card:hover .card-page-btn,
+.card-page-btn.is-active {
+  opacity: 1;
+}
+
+.card-page-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
 .card-parent {
   font-size: 0.725rem;
   color: var(--text-faint);

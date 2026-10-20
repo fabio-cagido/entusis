@@ -106,9 +106,16 @@ export class SupabaseRepository implements Repository {
 
   async upsertProjects(projects: Project[]) {
     if (!projects.length) return;
-    const { error } = await this.client
-      .from("projects")
-      .upsert(projects.map((p) => ({ ...p, user_id: this.userId })));
+    const rows = projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      icon: p.icon,
+      sort_order: p.sort_order,
+      created_at: p.created_at,
+      user_id: this.userId,
+    }));
+    const { error } = await this.client.from("projects").upsert(rows);
     if (error) throw error;
   }
 

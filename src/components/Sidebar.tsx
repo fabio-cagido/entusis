@@ -9,6 +9,7 @@ import {
   Cloud,
   Copy,
   ExternalLink,
+  FileText,
   HardDrive,
   KanbanSquare,
   Link2,
@@ -58,6 +59,9 @@ function NotionActionMenu({
   const duplicateItem = useStore((s) => s.duplicateItem);
   const deleteProject = useStore((s) => s.deleteProject);
   const deleteItem = useStore((s) => s.deleteItem);
+  const projects = useStore((s) => s.projects);
+  const createItem = useStore((s) => s.createItem);
+  const updateProject = useStore((s) => s.updateProject);
   const items = useStore((s) => s.items);
 
   const router = useRouter();
@@ -197,6 +201,47 @@ function NotionActionMenu({
         </span>
         <span>Duplicate</span>
       </button>
+
+      {target.type === "project" && (
+        <button
+          className="notion-menu-item"
+          onClick={() => {
+            const pr = projects[target.id];
+            if (!pr) return;
+            const existingPage =
+              Object.values(items).find((i) => i.project_id === pr.id && i.type === "PAGE" && !i.parent_id) ||
+              (pr.page_id ? items[pr.page_id] : null);
+
+            if (existingPage) {
+              onClose();
+              router.push(`/board?project=${pr.id}&tab=page`);
+            } else {
+              const page = createItem({
+                title: pr.name,
+                type: "PAGE",
+                icon: pr.icon || "📁",
+                project_id: pr.id,
+                parent_id: null,
+                content: `<h2>${pr.name} — Visão Geral</h2><p>Página central do projeto. Use este espaço para anotações, objetivos estratégicos e anexos.</p>`,
+              });
+              updateProject(pr.id, { page_id: page.id });
+              onShowToast("Página vinculada criada com sucesso!");
+              onClose();
+              router.push(`/board?project=${pr.id}&tab=page`);
+            }
+          }}
+        >
+          <span className="notion-menu-icon">
+            <FileText size={14} />
+          </span>
+          <span>
+            {Object.values(items).some((i) => i.project_id === target.id && i.type === "PAGE" && !i.parent_id) ||
+            projects[target.id]?.page_id
+              ? "Abrir Página do Projeto"
+              : "Criar Página Vinculada"}
+          </span>
+        </button>
+      )}
 
       <button className="notion-menu-item" onClick={handleRename}>
         <span className="notion-menu-icon">

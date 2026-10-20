@@ -12,7 +12,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarClock, ListChecks, Paperclip, Link2, Plus, Sunrise } from "lucide-react";
+import { CalendarClock, FileText, ListChecks, Paperclip, Link2, Plus, Sunrise } from "lucide-react";
 import { checklistProgress, useStore } from "@/lib/store";
 import { STATUS_LABEL } from "@/lib/types";
 import type { ItemNode, Status } from "@/lib/types";
@@ -23,8 +23,33 @@ import { formatWhen, typeIcon } from "@/lib/format";
 export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean }) {
   const project = useStore((s) => (item.project_id ? s.projects[item.project_id] : null));
   const parent = useStore((s) => (item.parent_id ? s.items[item.parent_id] : null));
+  const items = useStore((s) => s.items);
+  const projects = useStore((s) => s.projects);
+  const updateItem = useStore((s) => s.updateItem);
   const openDrawer = useStore((s) => s.openDrawer);
   const prog = checklistProgress(item.content);
+
+  const handlePageAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (item.type !== "PAGE") {
+      // Se tiver projeto, vincula como subpágina da página raiz do projeto
+      if (item.project_id) {
+        const prPage =
+          Object.values(items).find(
+            (i) => i.project_id === item.project_id && i.type === "PAGE" && !i.parent_id
+          ) || (projects[item.project_id]?.page_id ? items[projects[item.project_id].page_id!] : null);
+
+        updateItem(item.id, {
+          type: "PAGE",
+          parent_id: prPage ? prPage.id : item.parent_id,
+          icon: item.icon || "📄",
+        });
+      } else {
+        updateItem(item.id, { type: "PAGE", icon: item.icon || "📄" });
+      }
+    }
+    openDrawer(item.id);
+  };
 
   return (
     <div
@@ -36,12 +61,24 @@ export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean 
       <div className="card-top">
         <span className="card-icon">{typeIcon(item)}</span>
         <span className="card-title">{item.title || "Sem título"}</span>
+        <button
+          className="card-page-btn"
+          title={item.type === "PAGE" ? "Abrir página" : "Criar subpágina vinculada ao projeto"}
+          onClick={handlePageAction}
+        >
+          <FileText size={12} />
+        </button>
       </div>
       {parent && <div className="card-parent">↳ {parent.title || "Sem título"}</div>}
       <div className="card-meta">
         {project && (
           <span className="meta-chip">
             <span className="project-dot" style={{ background: project.color }} /> {project.name}
+          </span>
+        )}
+        {item.type === "PAGE" && (
+          <span className="meta-chip is-page">
+            <FileText size={10} /> Página
           </span>
         )}
         {item.schedule.start_time && (

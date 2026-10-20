@@ -24,6 +24,7 @@ export default function BoardView() {
   const projects = useStore((s) => s.projects);
   const createItem = useStore((s) => s.createItem);
   const updateItem = useStore((s) => s.updateItem);
+  const updateProject = useStore((s) => s.updateProject);
   const openDrawer = useStore((s) => s.openDrawer);
 
   const root = rootId ? items[rootId] : null;
@@ -61,6 +62,15 @@ export default function BoardView() {
     router.replace(`/board?${sp.toString()}`);
   };
 
+  const projectPage = useMemo(() => {
+    if (!project) return null;
+    return (
+      Object.values(items).find(
+        (i) => i.project_id === project.id && i.type === "PAGE" && !i.parent_id
+      ) || (project.page_id ? items[project.page_id] : null)
+    );
+  }, [project, items]);
+
   return (
     <div className="view">
       <header className="view-head">
@@ -84,7 +94,7 @@ export default function BoardView() {
 
         <div className="view-head-actions">
           {/* Alternador de Visões do Projeto: Página x Kanban x Ambos */}
-          {project && project.page_id && (
+          {project && projectPage && (
             <div className="segmented segmented-sm">
               <button
                 className={projectTab === "page" ? "is-active" : ""}
@@ -111,6 +121,29 @@ export default function BoardView() {
                 <span>Ambos</span>
               </button>
             </div>
+          )}
+
+          {/* Botão opcional para criar página se o projeto ainda não tiver */}
+          {project && !projectPage && (
+            <button
+              className="btn btn-ghost btn-xs"
+              title="Criar página própria vinculada a este projeto"
+              onClick={() => {
+                const page = createItem({
+                  title: project.name,
+                  type: "PAGE",
+                  icon: project.icon || "📁",
+                  project_id: project.id,
+                  parent_id: null,
+                  content: `<h2>${project.name} — Visão Geral</h2><p>Página central do projeto. Use este espaço para anotações, objetivos estratégicos e anexos.</p>`,
+                });
+                updateProject(project.id, { page_id: page.id });
+                handleTabChange("page");
+              }}
+            >
+              <FileText size={13} />
+              <span>+ Criar Página do Projeto</span>
+            </button>
           )}
 
           {!projectId && (
@@ -157,13 +190,13 @@ export default function BoardView() {
       )}
 
       {/* Visualização de Projeto */}
-      {project && project.page_id ? (
+      {project && projectPage ? (
         projectTab === "page" ? (
-          <PageEditor id={project.page_id} />
+          <PageEditor id={projectPage.id} />
         ) : projectTab === "split" ? (
           <div className="project-hub-split">
             <div className="project-hub-page-pane">
-              <PageEditor id={project.page_id} />
+              <PageEditor id={projectPage.id} />
             </div>
             <div className="project-hub-board-pane">
               <KanbanBoard
@@ -178,7 +211,7 @@ export default function BoardView() {
                     title: "Nova tarefa",
                     type: "TASK",
                     status,
-                    parent_id: project.page_id,
+                    parent_id: projectPage.id,
                     project_id: laneId ?? projectId,
                   });
                   openDrawer(n.id);
@@ -199,7 +232,7 @@ export default function BoardView() {
                 title: "Nova tarefa",
                 type: "TASK",
                 status,
-                parent_id: project.page_id,
+                parent_id: projectPage ? projectPage.id : null,
                 project_id: laneId ?? projectId,
               });
               openDrawer(n.id);
