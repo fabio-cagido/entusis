@@ -652,6 +652,12 @@ input, select, textarea {
   background: var(--bg-surface);
 }
 
+.side-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .sync-badge {
   display: inline-flex;
   align-items: center;

@@ -16,9 +16,11 @@ import {
   Search,
   Sun,
   Sunrise,
+  LogOut,
 } from "lucide-react";
 import { childrenOf, useStore, viewHref } from "@/lib/store";
 import type { ItemNode } from "@/lib/types";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 
 const DRAG_MIME = "application/x-nodes-flows-id";
 
@@ -335,7 +337,24 @@ export default function Sidebar() {
           {repo?.kind === "supabase" ? <Cloud size={13} /> : <HardDrive size={13} />}
           {sync === "saving" ? "Salvando…" : sync === "error" ? "Erro ao salvar" : repo?.kind === "supabase" ? "Sincronizado" : "Local"}
         </span>
-        <ThemeToggle />
+        <div className="side-footer-actions">
+          <ThemeToggle />
+          {isSupabaseConfigured && (
+            <button
+              id="btn-logout"
+              className="icon-btn icon-btn-danger"
+              title="Sair da conta"
+              onClick={async () => {
+                if (confirm("Deseja sair da sua conta?")) {
+                  const sb = getSupabase();
+                  if (sb) await sb.auth.signOut();
+                }
+              }}
+            >
+              <LogOut size={14} />
+            </button>
+          )}
+        </div>
       </footer>
     </aside>
   );
