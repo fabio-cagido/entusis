@@ -35,7 +35,7 @@ export function buildSeed(): { items: ItemNode[]; projects: Project[] } {
   const ensitec: Project = { id: uid(), name: "Ensitec", color: "#2dd4bf", icon: "🎓", sort_order: 1, created_at: t };
 
   const welcome = item({
-    title: "Bem-vindo ao entusis",
+    title: "Bem-vindo ao êntusis",
     icon: "👋",
     sort_order: 0,
     content:

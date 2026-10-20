@@ -5,7 +5,7 @@ import Sidebar from "@/components/Sidebar";
 import NodeDrawer from "@/components/NodeDrawer";
 
 export const metadata: Metadata = {
-  title: "entusis — Plataforma Integrada de Produtividade",
+  title: "êntusis — Plataforma Integrada de Produtividade",
   description: "Notion + Miro + Google Calendar em uma única base unificada de dados.",
 };
 

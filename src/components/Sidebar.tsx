@@ -253,7 +253,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <Link href="/today" className="brand">
         <span className="brand-mark" />
-        <span className="brand-name">entusis</span>
+        <span className="brand-name">êntusis</span>
       </Link>
 
       <QuickSearch />

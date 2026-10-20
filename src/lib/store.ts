@@ -78,7 +78,7 @@ export const useStore = create<State>((set, get) => {
       await repo.deleteProjects(pDel);
       set({ sync: "idle" });
     } catch (e) {
-      console.error("[entusis] sync failed", e);
+      console.error("[êntusis] sync failed", e);
       set({ sync: "error" });
     }
   };

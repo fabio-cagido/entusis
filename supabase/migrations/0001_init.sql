@@ -1,4 +1,4 @@
--- entusis — initial schema
+-- êntusis — initial schema
 -- Paste into Supabase → SQL Editor and run once.
 
 create type item_type as enum ('PAGE', 'MINDMAP_NODE', 'TASK', 'EVENT');

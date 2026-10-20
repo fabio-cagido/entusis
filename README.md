@@ -1,4 +1,4 @@
-# entusis
+# êntusis
 
 > **Plataforma Integrada de Produtividade**  
 > Combina o melhor de **Notion** (páginas hierárquicas e Kanban), **Miro** (canvas infinito de mapas mentais) e **Google Calendar** (gestão de tempo bidirecional) sob uma arquitetura de dados unificada: **`ItemNode`**.
@@ -7,7 +7,7 @@
 
 ## 🚀 Visão Geral
 
-No **entusis**, cada ideia, tarefa, página, evento ou nó de mapa mental é a mesma entidade: um `ItemNode`. Isso elimina a fragmentação entre ferramentas:
+No **êntusis**, cada ideia, tarefa, página, evento ou nó de mapa mental é a mesma entidade: um `ItemNode`. Isso elimina a fragmentação entre ferramentas:
 - Uma ideia rabiscada em um mapa mental pode se tornar uma tarefa no Kanban com **1 clique**.
 - Um nó pode abrir uma **gaveta lateral** contendo uma página completa com editor rico (TipTap), checklists, arquivos e vínculos.
 - Alterne entre visão de **Página**, **Canvas** e **Kanban** instantaneamente para os mesmos dados.
