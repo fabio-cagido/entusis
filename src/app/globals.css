@@ -1938,3 +1938,330 @@ li[data-type="taskItem"] > div {
 .spacer { flex: 1; }
 .muted { color: var(--text-muted); }
 .small { font-size: 0.75rem; }
+
+/* ==========================================================================
+   Notion-Style "To Do Today" View
+   ========================================================================== */
+
+.notion-today-view {
+  padding: 36px 44px 80px;
+  max-width: 1560px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.notion-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+
+.notion-main-title {
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-main);
+}
+
+.notion-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notion-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 36px 32px;
+  align-items: start;
+}
+
+.notion-project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notion-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.notion-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text-main);
+}
+
+.notion-project-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.notion-project-name {
+  letter-spacing: -0.015em;
+}
+
+.notion-project-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+
+.notion-card-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notion-tool-wrapper {
+  position: relative;
+}
+
+.notion-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+  font-size: 0.75rem;
+}
+
+.notion-tool-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.notion-tool-btn.is-active {
+  background: var(--primary-faint);
+  color: var(--primary);
+}
+
+.notion-filter-active-pill {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.notion-btn-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 3px 10px;
+  border-radius: 5px;
+  font-size: 0.775rem;
+  font-weight: 600;
+  margin-left: 4px;
+  transition: background 0.15s;
+}
+
+.notion-btn-new:hover {
+  background: #1d4ed8;
+}
+
+.notion-filter-popover {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  width: 180px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notion-filter-head {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 8px;
+}
+
+.notion-filter-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: left;
+  transition: all 0.12s;
+}
+
+.notion-filter-opt:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.notion-filter-opt.is-selected {
+  background: var(--primary-faint);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.notion-search-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  margin-top: 2px;
+}
+
+.notion-search-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.8rem;
+  width: 100%;
+  color: var(--text-main);
+}
+
+.notion-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notion-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+  user-select: none;
+}
+
+.notion-task-row:hover {
+  background: var(--bg-hover);
+}
+
+.notion-task-row.is-done .notion-task-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.notion-task-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  flex-shrink: 0;
+}
+
+.notion-task-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-main);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notion-task-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.notion-status-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.notion-status-doing {
+  background: #f59e0b;
+  color: #ffffff;
+}
+
+.notion-status-doing .status-symbol {
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.notion-status-todo {
+  color: #38bdf8;
+}
+
+.notion-status-done {
+  color: #10b981;
+}
+
+.notion-empty-row {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  padding: 8px 6px;
+  font-style: italic;
+}
+
+.notion-add-task-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  font-size: 0.825rem;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  transition: all 0.12s;
+  margin-top: 2px;
+  align-self: flex-start;
+}
+
+.notion-add-task-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.notion-new-task-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  margin-top: 2px;
+}
+
+.notion-new-task-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.875rem;
+  color: var(--text-main);
+  width: 100%;
+}
+
