@@ -302,6 +302,48 @@ input, select, textarea {
   margin-top: 12px;
 }
 
+.info-text {
+  font-size: 0.8rem;
+  color: var(--success);
+  margin-top: 12px;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
+
+.login-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.btn-link {
+  font-size: 0.8rem;
+  color: var(--primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: opacity 0.15s;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.btn-link.muted {
+  color: var(--text-muted);
+}
+
+.btn-link.muted:hover {
+  color: var(--text-main);
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;
