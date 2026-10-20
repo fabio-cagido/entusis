@@ -65,6 +65,14 @@ export default function CalendarView() {
   useEffect(() => {
     setIsConnected(isGcalConnected());
     loadGcal();
+
+    const handleStatus = () => {
+      setIsConnected(isGcalConnected());
+      loadGcal();
+    };
+
+    window.addEventListener("gcal-status-change", handleStatus);
+    return () => window.removeEventListener("gcal-status-change", handleStatus);
   }, [loadGcal]);
 
   const byDay = useMemo(() => {
@@ -107,6 +115,22 @@ export default function CalendarView() {
     }
   };
 
+  const handleConnect = async () => {
+    try {
+      setIsGcalLoading(true);
+      const connected = await connectGoogleCalendar("/calendar");
+      if (connected) {
+        setIsConnected(true);
+        loadGcal();
+      }
+    } catch (e: any) {
+      console.warn("[CalendarView] connection error:", e);
+      alert(e?.message || "Erro ao conectar Google Agenda");
+    } finally {
+      setIsGcalLoading(false);
+    }
+  };
+
   return (
     <div className="view">
       <header className="view-head">
@@ -140,11 +164,12 @@ export default function CalendarView() {
           ) : (
             <button
               className="gcal-connect-btn"
-              onClick={() => connectGoogleCalendar("/calendar")}
+              onClick={handleConnect}
+              disabled={isGcalLoading}
               title="Conectar com sua conta Google para sincronizar a agenda"
             >
               <Calendar size={13} />
-              <span>Conectar Google Calendar</span>
+              <span>{isGcalLoading ? "Conectando..." : "Conectar Google Calendar"}</span>
             </button>
           )}
 

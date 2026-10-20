@@ -84,6 +84,14 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
   useEffect(() => {
     setIsConnected(isGcalConnected());
     loadGcalEvents();
+
+    const handleStatusChange = () => {
+      setIsConnected(isGcalConnected());
+      loadGcalEvents();
+    };
+
+    window.addEventListener("gcal-status-change", handleStatusChange);
+    return () => window.removeEventListener("gcal-status-change", handleStatusChange);
   }, [loadGcalEvents]);
 
   // Mapeia os itens agendados para os 7 dias
@@ -157,6 +165,22 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
     }
   };
 
+  const handleConnect = async () => {
+    try {
+      setIsGcalLoading(true);
+      const connected = await connectGoogleCalendar("/today");
+      if (connected) {
+        setIsConnected(true);
+        loadGcalEvents();
+      }
+    } catch (e: any) {
+      console.warn("[gcal] connection error:", e);
+      alert(e?.message || "Erro ao conectar Google Agenda");
+    } finally {
+      setIsGcalLoading(false);
+    }
+  };
+
   return (
     <section className="week-agenda-section glass">
       {/* Top Header da Agenda Semanal */}
@@ -189,11 +213,12 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
           ) : (
             <button
               className="gcal-connect-btn"
-              onClick={() => connectGoogleCalendar("/today")}
+              onClick={handleConnect}
+              disabled={isGcalLoading}
               title="Conectar com o Google Calendar para ver e sincronizar eventos"
             >
               <Calendar size={12} />
-              <span>Conectar Google Agenda</span>
+              <span>{isGcalLoading ? "Conectando..." : "Conectar Google Agenda"}</span>
             </button>
           )}
         </div>
