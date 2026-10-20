@@ -14,28 +14,45 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
+    let started = false;
+    let cancelled = false;
+
     const sb = getSupabase();
     if (!isSupabaseConfigured || !sb) {
       void init();
       return;
     }
+
     const start = async (userId: string) => {
+      if (started || cancelled) return;
+      started = true;
       const repo = new SupabaseRepository(sb, userId);
       await init(repo);
-      unsub = repo.subscribe(applyRemote);
+      if (!cancelled) {
+        unsub = repo.subscribe(applyRemote);
+      }
     };
+
     sb.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
       if (data.session) void start(data.session.user.id);
       else setNeedsLogin(true);
     });
+
     const { data: listener } = sb.auth.onAuthStateChange((evt, session) => {
-      if (evt === "SIGNED_IN" && session && !useStore.getState().ready) {
+      if (cancelled) return;
+      if (evt === "SIGNED_IN" && session && !started) {
         setNeedsLogin(false);
         void start(session.user.id);
       }
-      if (evt === "SIGNED_OUT") window.location.reload();
+      if (evt === "SIGNED_OUT") {
+        started = false;
+        window.location.reload();
+      }
     });
+
     return () => {
+      cancelled = true;
       unsub?.();
       listener.subscription.unsubscribe();
     };

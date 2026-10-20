@@ -119,8 +119,9 @@ export class SupabaseRepository implements Repository {
   }
 
   subscribe(onChange: (c: RemoteChange) => void) {
+    const channelTopic = `entusis-changes-${crypto.randomUUID()}`;
     const channel = this.client
-      .channel("nodes-flows")
+      .channel(channelTopic)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "item_nodes" },
