@@ -132,6 +132,12 @@ export const useStore = create<State>((set, get) => {
           if (match) {
             pr.page_id = match.id;
             match.project_id = pr.id;
+            if (match.title !== pr.name && (match.title.toLowerCase() === "novo projeto" || match.title.toLowerCase() === "sem título")) {
+              match.title = pr.name;
+              if (match.content && match.content.includes("<h2>Novo projeto — Visão Geral</h2>")) {
+                match.content = match.content.replace("<h2>Novo projeto — Visão Geral</h2>", `<h2>${pr.name} — Visão Geral</h2>`);
+              }
+            }
             touchedItems.push(match.id);
             touchedProjects.push(pr.id);
           } else {
@@ -191,7 +197,10 @@ export const useStore = create<State>((set, get) => {
           if (!items[id]) continue;
           items[id] = { ...items[id], ...patch, updated_at: t };
           if (patch.title) {
-            const proj = Object.values(projects).find((p) => p.page_id === id);
+            const it = items[id];
+            const proj = Object.values(projects).find(
+              (p) => p.page_id === id || (it && it.project_id === p.id && it.type === "PAGE" && !it.parent_id)
+            );
             if (proj && proj.name !== patch.title) {
               projectUpdates.push({ id: proj.id, name: patch.title });
             }
@@ -306,8 +315,22 @@ export const useStore = create<State>((set, get) => {
       const cur = get().projects[id];
       if (!cur) return;
       set((s) => ({ projects: { ...s.projects, [id]: { ...s.projects[id], ...patch } } }));
-      if (patch.name && cur.page_id) {
-        get().updateItem(cur.page_id, { title: patch.name });
+      if (patch.name) {
+        const { items } = get();
+        const page =
+          (cur.page_id ? items[cur.page_id] : null) ||
+          Object.values(items).find(
+            (i) => i.project_id === id && i.type === "PAGE" && !i.parent_id
+          );
+        if (page && page.title !== patch.name) {
+          let content = page.content;
+          if (cur.name && content && content.includes(`<h2>${cur.name} — Visão Geral</h2>`)) {
+            content = content.replace(`<h2>${cur.name} — Visão Geral</h2>`, `<h2>${patch.name} — Visão Geral</h2>`);
+          } else if (content && content.includes("<h2>Novo projeto — Visão Geral</h2>")) {
+            content = content.replace("<h2>Novo projeto — Visão Geral</h2>", `<h2>${patch.name} — Visão Geral</h2>`);
+          }
+          get().updateItem(page.id, { title: patch.name, content });
+        }
       }
       pendingProjects.add(id);
       schedule();
@@ -400,7 +423,19 @@ export const useStore = create<State>((set, get) => {
           });
         } else if (c.record && !pendingProjects.has(c.record.id)) {
           const r = c.record as Project;
-          set((s) => ({ projects: { ...s.projects, [r.id]: r } }));
+          set((s) => {
+            const existing = s.projects[r.id];
+            return {
+              projects: {
+                ...s.projects,
+                [r.id]: {
+                  ...existing,
+                  ...r,
+                  page_id: existing?.page_id ?? r.page_id,
+                },
+              },
+            };
+          });
         }
       }
     },

@@ -19,6 +19,7 @@ export default function BoardView() {
   const initialTab = (params.get("tab") as "page" | "kanban" | "split") || "page";
 
   const [projectTab, setProjectTab] = useState<"page" | "kanban" | "split">(initialTab);
+  const [editingTitle, setEditingTitle] = useState(false);
 
   const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
@@ -82,10 +83,34 @@ export default function BoardView() {
                 {typeIcon(root)} {root.title || "Sem título"}
               </>
             ) : project ? (
-              <>
-                <span className="project-dot project-dot-lg" style={{ background: project.color }} />{" "}
-                {project.name}
-              </>
+              editingTitle ? (
+                <input
+                  autoFocus
+                  className="input input-sm"
+                  style={{ fontSize: "1.25rem", fontWeight: 700, padding: "2px 8px", width: "auto" }}
+                  defaultValue={project.name}
+                  onBlur={(e) => {
+                    const val = e.target.value.trim();
+                    if (val && val !== project.name) {
+                      updateProject(project.id, { name: val });
+                    }
+                    setEditingTitle(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingTitle(false);
+                  }}
+                />
+              ) : (
+                <span
+                  title="Clique duas vezes para renomear o projeto"
+                  onDoubleClick={() => setEditingTitle(true)}
+                  style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "8px" }}
+                >
+                  <span className="project-dot project-dot-lg" style={{ background: project.color }} />{" "}
+                  {project.name}
+                </span>
+              )
             ) : (
               "Todas as tarefas"
             )}
