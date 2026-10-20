@@ -110,6 +110,11 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
         e.stopPropagation();
         ctx.startEditing(item.id);
       }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMenuOpen((v) => !v);
+      }}
     >
       <Handle type="target" position={Position.Left} id="l-t" className="mind-handle" />
       <Handle type="source" position={Position.Left} id="l-s" className="mind-handle" />
@@ -148,18 +153,16 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
             <Maximize2 size={12} />
           </button>
 
-          {!isRoot && (
-            <button
-              className={`mind-action-btn nodrag ${menuOpen ? "is-active" : ""}`}
-              title="Opções do nó"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen(!menuOpen);
-              }}
-            >
-              <MoreHorizontal size={13} />
-            </button>
-          )}
+          <button
+            className={`mind-action-btn nodrag ${menuOpen ? "is-active" : ""}`}
+            title="Opções do nó (3 pontinhos)"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(!menuOpen);
+            }}
+          >
+            <MoreHorizontal size={13} />
+          </button>
         </div>
       </div>
 
