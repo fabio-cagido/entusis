@@ -9,6 +9,7 @@ import {
   FileBox,
   Globe,
   HardDrive,
+  KanbanSquare,
   Link2,
   Plus,
   Sunrise,
@@ -341,6 +342,16 @@ export default function PageEditor({ id, compact = false }: { id: string; compac
             <span className="crumb-current">{item.title || "Sem título"}</span>
           </nav>
           <div className="page-topbar-actions">
+            {item.project_id && (
+              <Link
+                href={`/board?project=${item.project_id}&tab=kanban`}
+                className="btn btn-ghost btn-xs"
+                title="Abrir quadro Kanban do projeto"
+              >
+                <KanbanSquare size={13} />
+                <span>Quadro Kanban</span>
+              </Link>
+            )}
             <ViewSwitcher id={item.id} />
             <button
               id="delete-item"

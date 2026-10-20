@@ -24,11 +24,15 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
+  FileText,
   KanbanSquare,
   Link2,
   Maximize,
   Maximize2,
+  MoreHorizontal,
   Paperclip,
+  PenLine,
   Plus,
   Trash2,
   Wand2,
@@ -59,6 +63,9 @@ interface Ctx {
   startEditing(id: string): void;
   open(id: string): void;
   toggleCollapse(id: string): void;
+  convertToPage(id: string): void;
+  createChildPage(id: string): void;
+  deleteNode(id: string): void;
 }
 const MindCtx = createContext<Ctx | null>(null);
 
@@ -70,10 +77,23 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
   const ctx = useContext(MindCtx)!;
   const { item, color, isRoot, editing, childCount, collapsed, side } = data;
   const [draft, setDraft] = useState(item.title);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editing) setDraft(item.title);
   }, [editing, item.title]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as unknown as HTMLElement)) {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handleOutside);
+    return () => window.removeEventListener("pointerdown", handleOutside);
+  }, [menuOpen]);
 
   const commit = () => {
     ctx.rename(item.id, draft.trim());
@@ -97,7 +117,7 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
       <Handle type="source" position={Position.Right} id="r-s" className="mind-handle" />
 
       <div className="mind-main">
-        <span className="mind-icon">{typeIcon(item)}</span>
+        <span className="mind-icon">{item.type === "PAGE" ? "📄" : typeIcon(item)}</span>
         {editing ? (
           <input
             className="mind-input nodrag"
@@ -115,20 +135,122 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
         ) : (
           <span className="mind-title">{item.title || <em className="muted">Sem título</em>}</span>
         )}
-        <button
-          className="mind-open nodrag"
-          title="Abrir página do nó"
-          onClick={(e) => {
-            e.stopPropagation();
-            ctx.open(item.id);
-          }}
-        >
-          <Maximize2 size={12} />
-        </button>
+
+        <div className="mind-actions">
+          <button
+            className="mind-action-btn nodrag"
+            title={item.type === "PAGE" ? "Abrir página" : "Abrir detalhes"}
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.open(item.id);
+            }}
+          >
+            <Maximize2 size={12} />
+          </button>
+
+          {!isRoot && (
+            <button
+              className={`mind-action-btn nodrag ${menuOpen ? "is-active" : ""}`}
+              title="Opções do nó"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(!menuOpen);
+              }}
+            >
+              <MoreHorizontal size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {(item.status || item.schedule.start_time || item.attachments.length > 0 || item.links.length > 0) && (
+      {/* Menu Contextual do Nó Estilo Notion */}
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          className="notion-action-menu nodrag"
+          style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, minWidth: 200, zIndex: 100 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="notion-menu-header">Ramo do Mapa</div>
+
+          {item.type !== "PAGE" ? (
+            <button
+              className="notion-menu-item"
+              onClick={() => {
+                setMenuOpen(false);
+                ctx.convertToPage(item.id);
+              }}
+            >
+              <span className="notion-menu-icon">
+                <FileText size={14} />
+              </span>
+              <span>Converter em Página</span>
+            </button>
+          ) : (
+            <button
+              className="notion-menu-item"
+              onClick={() => {
+                setMenuOpen(false);
+                ctx.open(item.id);
+              }}
+            >
+              <span className="notion-menu-icon">
+                <ExternalLink size={14} />
+              </span>
+              <span>Abrir Página Completa</span>
+            </button>
+          )}
+
+          <button
+            className="notion-menu-item"
+            onClick={() => {
+              setMenuOpen(false);
+              ctx.createChildPage(item.id);
+            }}
+          >
+            <span className="notion-menu-icon">
+              <Plus size={14} />
+            </span>
+            <span>Criar Subpágina Vinculada</span>
+          </button>
+
+          <button
+            className="notion-menu-item"
+            onClick={() => {
+              setMenuOpen(false);
+              ctx.startEditing(item.id);
+            }}
+          >
+            <span className="notion-menu-icon">
+              <PenLine size={14} />
+            </span>
+            <span>Renomear</span>
+          </button>
+
+          <div className="notion-menu-divider" />
+
+          <button
+            className="notion-menu-item is-danger"
+            onClick={() => {
+              setMenuOpen(false);
+              ctx.deleteNode(item.id);
+            }}
+          >
+            <span className="notion-menu-icon">
+              <Trash2 size={14} />
+            </span>
+            <span>Excluir Ramo</span>
+          </button>
+        </div>
+      )}
+
+      {(item.type === "PAGE" || item.status || item.schedule.start_time || item.attachments.length > 0 || item.links.length > 0) && (
         <div className="mind-badges">
+          {item.type === "PAGE" && (
+            <span className="mind-page-badge" title="Este nó é uma página completa">
+              <FileText size={10} /> Página
+            </span>
+          )}
           {item.status && <span className={`status-pill status-${item.status}`}>{STATUS_LABEL[item.status]}</span>}
           {item.schedule.start_time && (
             <span className="meta-chip"><CalendarClock size={10} /> {formatWhen(item.schedule.start_time)}</span>
@@ -455,8 +577,23 @@ function MindMapInner({ rootId }: { rootId: string }) {
           else c.add(id);
           return c;
         }),
+      convertToPage: (id) => {
+        updateItem(id, { type: "PAGE", icon: "📄" });
+        openDrawer(id);
+      },
+      createChildPage: (parentId) => {
+        const n = createItem({
+          parent_id: parentId,
+          title: "Nova subpágina vinculada",
+          type: "PAGE",
+          icon: "📄",
+          content: "<p>Subpágina criada a partir do mapa mental...</p>",
+        });
+        openDrawer(n.id);
+      },
+      deleteNode: (id) => deleteItem(id),
     }),
-    [updateItem, openDrawer],
+    [updateItem, openDrawer, createItem, deleteItem],
   );
 
   if (!root) return <div className="empty-state"><h1>Mapa não encontrado</h1></div>;

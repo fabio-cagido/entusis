@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
-import { Layers, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Columns2, FileText, KanbanSquare, Layers, X } from "lucide-react";
 import { descendantsOf, useStore } from "@/lib/store";
 import { STATUSES } from "@/lib/types";
 import KanbanBoard, { type Lane } from "./KanbanBoard";
+import PageEditor from "./PageEditor";
 import ViewSwitcher from "./ViewSwitcher";
 import { typeIcon } from "@/lib/format";
 
@@ -15,6 +16,9 @@ export default function BoardView() {
   const rootId = params.get("root");
   const projectId = params.get("project");
   const grouped = params.get("group") !== "flat";
+  const initialTab = (params.get("tab") as "page" | "kanban" | "split") || "page";
+
+  const [projectTab, setProjectTab] = useState<"page" | "kanban" | "split">(initialTab);
 
   const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
@@ -50,22 +54,65 @@ export default function BoardView() {
     router.replace(`/board${sp.toString() ? `?${sp}` : ""}`);
   };
 
+  const handleTabChange = (t: "page" | "kanban" | "split") => {
+    setProjectTab(t);
+    const sp = new URLSearchParams(params.toString());
+    sp.set("tab", t);
+    router.replace(`/board?${sp.toString()}`);
+  };
+
   return (
     <div className="view">
       <header className="view-head">
         <div>
-          <p className="eyebrow">Kanban</p>
+          <p className="eyebrow">{project ? "Projeto" : "Kanban"}</p>
           <h1 className="view-title">
             {root ? (
-              <>{typeIcon(root)} {root.title || "Sem título"}</>
+              <>
+                {typeIcon(root)} {root.title || "Sem título"}
+              </>
             ) : project ? (
-              <><span className="project-dot project-dot-lg" style={{ background: project.color }} /> {project.name}</>
+              <>
+                <span className="project-dot project-dot-lg" style={{ background: project.color }} />{" "}
+                {project.name}
+              </>
             ) : (
               "Todas as tarefas"
             )}
           </h1>
         </div>
+
         <div className="view-head-actions">
+          {/* Alternador de Visões do Projeto: Página x Kanban x Ambos */}
+          {project && project.page_id && (
+            <div className="segmented segmented-sm">
+              <button
+                className={projectTab === "page" ? "is-active" : ""}
+                onClick={() => handleTabChange("page")}
+                title="Página do Projeto (Texto rico, Anexos, Documentos)"
+              >
+                <FileText size={13} />
+                <span>Página</span>
+              </button>
+              <button
+                className={projectTab === "kanban" ? "is-active" : ""}
+                onClick={() => handleTabChange("kanban")}
+                title="Quadro Kanban de Tarefas"
+              >
+                <KanbanSquare size={13} />
+                <span>Kanban</span>
+              </button>
+              <button
+                className={projectTab === "split" ? "is-active" : ""}
+                onClick={() => handleTabChange("split")}
+                title="Visualização Integrada (Página + Kanban)"
+              >
+                <Columns2 size={13} />
+                <span>Ambos</span>
+              </button>
+            </div>
+          )}
+
           {!projectId && (
             <button
               id="toggle-group"
@@ -75,47 +122,111 @@ export default function BoardView() {
               <Layers size={13} /> Agrupar por projeto
             </button>
           )}
+
           {root && <ViewSwitcher id={root.id} />}
         </div>
       </header>
 
-      <div className="filter-bar">
-        <button className={`filter-chip ${!projectId ? "is-active" : ""}`} onClick={() => setParam("project", null)}>Todos</button>
-        {Object.values(projects)
-          .sort((a, b) => a.sort_order - b.sort_order)
-          .map((p) => (
-            <button
-              key={p.id}
-              className={`filter-chip ${projectId === p.id ? "is-active" : ""}`}
-              style={{ ["--accent" as string]: p.color }}
-              onClick={() => setParam("project", projectId === p.id ? null : p.id)}
-            >
-              <span className="project-dot" style={{ background: p.color }} /> {p.name}
-            </button>
-          ))}
-        {root && (
-          <button className="filter-chip is-active" onClick={() => setParam("root", null)}>
-            Dentro de: {root.title || "Sem título"} <X size={12} />
+      {/* Barra de Filtros de Projetos quando visualizando quadro geral */}
+      {!projectId && (
+        <div className="filter-bar">
+          <button
+            className={`filter-chip ${!projectId ? "is-active" : ""}`}
+            onClick={() => setParam("project", null)}
+          >
+            Todos
           </button>
-        )}
-      </div>
+          {Object.values(projects)
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((p) => (
+              <button
+                key={p.id}
+                className={`filter-chip ${projectId === p.id ? "is-active" : ""}`}
+                style={{ ["--accent" as string]: p.color }}
+                onClick={() => setParam("project", projectId === p.id ? null : p.id)}
+              >
+                <span className="project-dot" style={{ background: p.color }} /> {p.name}
+              </button>
+            ))}
+          {root && (
+            <button className="filter-chip is-active" onClick={() => setParam("root", null)}>
+              Dentro de: {root.title || "Sem título"} <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
 
-      <KanbanBoard
-        items={scoped}
-        statuses={STATUSES}
-        lanes={lanes}
-        onMove={(id, status, laneId) => updateItem(id, lanes ? { status, project_id: laneId } : { status })}
-        onAdd={(status, laneId) => {
-          const n = createItem({
-            title: "Nova tarefa",
-            type: "TASK",
-            status,
-            parent_id: root?.id ?? null,
-            project_id: laneId ?? projectId ?? root?.project_id ?? null,
-          });
-          openDrawer(n.id);
-        }}
-      />
+      {/* Visualização de Projeto */}
+      {project && project.page_id ? (
+        projectTab === "page" ? (
+          <PageEditor id={project.page_id} />
+        ) : projectTab === "split" ? (
+          <div className="project-hub-split">
+            <div className="project-hub-page-pane">
+              <PageEditor id={project.page_id} />
+            </div>
+            <div className="project-hub-board-pane">
+              <KanbanBoard
+                items={scoped}
+                statuses={STATUSES}
+                lanes={lanes}
+                onMove={(id, status, laneId) =>
+                  updateItem(id, lanes ? { status, project_id: laneId } : { status })
+                }
+                onAdd={(status, laneId) => {
+                  const n = createItem({
+                    title: "Nova tarefa",
+                    type: "TASK",
+                    status,
+                    parent_id: project.page_id,
+                    project_id: laneId ?? projectId,
+                  });
+                  openDrawer(n.id);
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          <KanbanBoard
+            items={scoped}
+            statuses={STATUSES}
+            lanes={lanes}
+            onMove={(id, status, laneId) =>
+              updateItem(id, lanes ? { status, project_id: laneId } : { status })
+            }
+            onAdd={(status, laneId) => {
+              const n = createItem({
+                title: "Nova tarefa",
+                type: "TASK",
+                status,
+                parent_id: project.page_id,
+                project_id: laneId ?? projectId,
+              });
+              openDrawer(n.id);
+            }}
+          />
+        )
+      ) : (
+        /* Visualização Geral do Kanban */
+        <KanbanBoard
+          items={scoped}
+          statuses={STATUSES}
+          lanes={lanes}
+          onMove={(id, status, laneId) =>
+            updateItem(id, lanes ? { status, project_id: laneId } : { status })
+          }
+          onAdd={(status, laneId) => {
+            const n = createItem({
+              title: "Nova tarefa",
+              type: "TASK",
+              status,
+              parent_id: root?.id ?? null,
+              project_id: laneId ?? projectId ?? root?.project_id ?? null,
+            });
+            openDrawer(n.id);
+          }}
+        />
+      )}
     </div>
   );
 }

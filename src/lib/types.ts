@@ -78,6 +78,7 @@ export interface Project {
   icon: string | null;
   sort_order: number;
   created_at: string;
+  page_id?: string | null;
 }
 
 export const emptySchedule = (): Schedule => ({

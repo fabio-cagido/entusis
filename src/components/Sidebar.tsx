@@ -652,7 +652,17 @@ export default function Sidebar() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  const roots = useMemo(() => childrenOf(items, null).filter((i) => i.type === "PAGE"), [items]);
+  const projects = useStore((s) => s.projects);
+
+  const projectPageIds = useMemo(
+    () => new Set(Object.values(projects).map((p) => p.page_id).filter((id): id is string => Boolean(id))),
+    [projects]
+  );
+
+  const roots = useMemo(
+    () => childrenOf(items, null).filter((i) => i.type === "PAGE" && !projectPageIds.has(i.id)),
+    [items, projectPageIds]
+  );
 
   const nav = [
     { href: "/today", label: "Hoje", icon: <Sunrise size={16} />, id: "nav-today" },

@@ -46,8 +46,24 @@ export function buildSeed(): { items: ItemNode[]; projects: Project[] } {
       '<li data-type="taskItem" data-checked="false"><p>Criar sua primeira subpágina</p></li></ul>',
   });
 
-  const redeHub = item({ title: "Rede Cruzada", icon: "🕸️", project_id: rede.id, sort_order: 1 });
-  const ensitecHub = item({ title: "Ensitec", icon: "🎓", project_id: ensitec.id, sort_order: 2 });
+  const redeHub = item({
+    title: "Rede Cruzada",
+    icon: "🕸️",
+    project_id: rede.id,
+    sort_order: 1,
+    content:
+      "<h2>Rede Cruzada — Visão Geral</h2><p>Página central do projeto. Aqui você encontra objetivos estratégicos, documentação e tarefas vinculadas.</p>",
+  });
+  const ensitecHub = item({
+    title: "Ensitec",
+    icon: "🎓",
+    project_id: ensitec.id,
+    sort_order: 2,
+    content:
+      "<h2>Ensitec — Gestão Acadêmica</h2><p>Página central do projeto Ensitec com planejamento de aulas, coordenação e notas.</p>",
+  });
+  rede.page_id = redeHub.id;
+  ensitec.page_id = ensitecHub.id;
 
   const today = new Date();
   today.setHours(14, 0, 0, 0);

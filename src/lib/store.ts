@@ -118,14 +118,53 @@ export const useStore = create<State>((set, get) => {
       } catch {
         favs = [];
       }
+      // Garante que todo projeto tem uma página raiz vinculada
+      const itemsMap = Object.fromEntries(snap.items.map((i) => [i.id, i]));
+      const projectsMap = Object.fromEntries(snap.projects.map((p) => [p.id, p]));
+      const touchedItems: string[] = [];
+      const touchedProjects: string[] = [];
+
+      for (const pr of Object.values(projectsMap)) {
+        if (!pr.page_id || !itemsMap[pr.page_id]) {
+          const match = Object.values(itemsMap).find(
+            (it) => it.type === "PAGE" && (it.project_id === pr.id || it.title.toLowerCase().trim() === pr.name.toLowerCase().trim())
+          );
+          if (match) {
+            pr.page_id = match.id;
+            match.project_id = pr.id;
+            touchedItems.push(match.id);
+            touchedProjects.push(pr.id);
+          } else {
+            const page = newItem({
+              title: pr.name,
+              type: "PAGE",
+              icon: pr.icon || "📁",
+              project_id: pr.id,
+              parent_id: null,
+              content: `<h2>${pr.name} — Visão Geral</h2><p>Página central do projeto. Aqui você encontra objetivos estratégicos, notas, arquivos e o quadro de tarefas.</p>`,
+            });
+            itemsMap[page.id] = page;
+            pr.page_id = page.id;
+            touchedItems.push(page.id);
+            touchedProjects.push(pr.id);
+          }
+        }
+      }
+
       set({
         repo: r,
         ready: true,
         theme,
         favorites: favs,
-        items: Object.fromEntries(snap.items.map((i) => [i.id, i])),
-        projects: Object.fromEntries(snap.projects.map((p) => [p.id, p])),
+        items: itemsMap,
+        projects: projectsMap,
       });
+
+      if (touchedItems.length > 0) touchItems(touchedItems);
+      if (touchedProjects.length > 0) {
+        touchedProjects.forEach((id) => pendingProjects.add(id));
+        schedule();
+      }
     },
 
     createItem(p) {
@@ -143,14 +182,26 @@ export const useStore = create<State>((set, get) => {
 
     updateItems(patches) {
       const t = new Date().toISOString();
+      const { projects } = get();
+      const projectUpdates: { id: string; name: string }[] = [];
+
       set((s) => {
         const items = { ...s.items };
         for (const { id, patch } of patches) {
           if (!items[id]) continue;
           items[id] = { ...items[id], ...patch, updated_at: t };
+          if (patch.title) {
+            const proj = Object.values(projects).find((p) => p.page_id === id);
+            if (proj && proj.name !== patch.title) {
+              projectUpdates.push({ id: proj.id, name: patch.title });
+            }
+          }
         }
         return { items };
       });
+      for (const pu of projectUpdates) {
+        get().updateProject(pu.id, { name: pu.name });
+      }
       touchItems(patches.map((p) => p.id));
     },
 
@@ -220,13 +271,29 @@ export const useStore = create<State>((set, get) => {
 
     createProject(p) {
       const n = Object.keys(get().projects).length;
+      const id = crypto.randomUUID();
+      const color = p.color || ["#8b7bff", "#2dd4bf", "#f472b6", "#facc15", "#38bdf8", "#fb923c"][n % 6];
+      const name = p.name || "Novo projeto";
+      const icon = p.icon ?? null;
+
+      // Cria a Página Central do Projeto automaticamente
+      const page = get().createItem({
+        title: name,
+        type: "PAGE",
+        icon: icon || "📁",
+        project_id: id,
+        parent_id: null,
+        content: `<h2>${name} — Visão Geral</h2><p>Página central do projeto. Use este espaço para anotações, objetivos estratégicos, anexos e o quadro de tarefas.</p>`,
+      });
+
       const pr: Project = {
-        id: crypto.randomUUID(),
-        name: "Novo projeto",
-        color: ["#8b7bff", "#2dd4bf", "#f472b6", "#facc15", "#38bdf8", "#fb923c"][n % 6],
-        icon: null,
+        id,
+        name,
+        color,
+        icon,
         sort_order: n,
         created_at: new Date().toISOString(),
+        page_id: page.id,
         ...p,
       };
       set((s) => ({ projects: { ...s.projects, [pr.id]: pr } }));
@@ -236,7 +303,12 @@ export const useStore = create<State>((set, get) => {
     },
 
     updateProject(id, patch) {
+      const cur = get().projects[id];
+      if (!cur) return;
       set((s) => ({ projects: { ...s.projects, [id]: { ...s.projects[id], ...patch } } }));
+      if (patch.name && cur.page_id) {
+        get().updateItem(cur.page_id, { title: patch.name });
+      }
       pendingProjects.add(id);
       schedule();
     },
