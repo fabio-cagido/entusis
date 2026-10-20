@@ -19,6 +19,7 @@ import {
 import { isToday, useStore } from "@/lib/store";
 import type { ItemNode, Project, Status } from "@/lib/types";
 import KanbanBoard, { type Lane } from "./KanbanBoard";
+import { WeekAgendaStrip } from "./WeekAgendaStrip";
 
 type FilterStatus = "ALL" | "DOING" | "TODO" | "DONE";
 
@@ -335,6 +336,26 @@ export default function TodayView() {
     return ls;
   }, [projectList, todays, projects]);
 
+  const handleCreateEventFromDate = (date: Date) => {
+    const start = new Date(date);
+    start.setHours(9, 0, 0, 0);
+    const end = new Date(start);
+    end.setHours(10, 0, 0, 0);
+
+    const n = createItem({
+      title: "Novo compromisso",
+      type: "EVENT",
+      status: "TODO",
+      is_today: isToday(start.toISOString()),
+      schedule: {
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        google_event_id: null,
+      },
+    });
+    openDrawer(n.id);
+  };
+
   return (
     <div className="notion-today-view">
       {/* Top Header estilo Notion minimalista */}
@@ -382,6 +403,12 @@ export default function TodayView() {
           </div>
         </div>
       </header>
+
+      {/* Agenda Semanal: do dia atual até 7 dias para frente */}
+      <WeekAgendaStrip
+        onOpenDrawer={openDrawer}
+        onCreateEvent={handleCreateEventFromDate}
+      />
 
       {/* Conteúdo Principal */}
       {layoutMode === "grid" ? (
