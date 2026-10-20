@@ -2579,12 +2579,78 @@ li[data-type="taskItem"] > div {
   margin-left: 6px;
 }
 
+.gcal-connect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(66, 133, 244, 0.12);
+  color: #4285f4;
+  border: 1px solid rgba(66, 133, 244, 0.35);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 6px;
+}
+.gcal-connect-btn:hover {
+  background: rgba(66, 133, 244, 0.22);
+  border-color: #4285f4;
+  transform: translateY(-1px);
+}
+
+.gcal-connected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  margin-left: 6px;
+}
+
 .gcal-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #4285f4;
   box-shadow: 0 0 6px rgba(66, 133, 244, 0.6);
+}
+
+.gcal-dot.is-online {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.icon-btn-xs {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  opacity: 0.8;
+  transition: opacity 0.15s ease;
+}
+.icon-btn-xs:hover {
+  opacity: 1;
+}
+
+.week-event-card.is-gcal {
+  border-left-color: #4285f4;
+  background: rgba(66, 133, 244, 0.08);
+}
+.week-event-card.is-gcal:hover {
+  background: rgba(66, 133, 244, 0.15);
+  border-color: #4285f4;
 }
 
 .week-agenda-nav {

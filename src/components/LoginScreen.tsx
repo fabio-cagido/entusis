@@ -18,7 +18,14 @@ export default function LoginScreen() {
     setError(null);
     const { error } = await sb.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      options: {
+        redirectTo: `${window.location.origin}/today?gcal=connected`,
+        scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
+      },
     });
     if (error) setError(error.message);
   };

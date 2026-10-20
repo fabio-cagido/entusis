@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import { SupabaseRepository } from "@/lib/repository/supabase";
+import { setGcalTokens } from "@/lib/google/calendar";
 import LoginScreen from "./LoginScreen";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
@@ -35,12 +36,21 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
     sb.auth.getSession().then(({ data }) => {
       if (cancelled) return;
-      if (data.session) void start(data.session.user.id);
-      else setNeedsLogin(true);
+      if (data.session) {
+        if (data.session.provider_token) {
+          setGcalTokens(data.session.provider_token, data.session.provider_refresh_token);
+        }
+        void start(data.session.user.id);
+      } else {
+        setNeedsLogin(true);
+      }
     });
 
     const { data: listener } = sb.auth.onAuthStateChange((evt, session) => {
       if (cancelled) return;
+      if (session?.provider_token) {
+        setGcalTokens(session.provider_token, session.provider_refresh_token);
+      }
       if (evt === "SIGNED_IN" && session && !started) {
         setNeedsLogin(false);
         void start(session.user.id);

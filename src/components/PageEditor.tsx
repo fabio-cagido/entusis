@@ -22,6 +22,7 @@ import type { Attachment, ItemNode, ItemType, Status } from "@/lib/types";
 import { detectAttachmentKind, formatWhen, fromLocalInput, toLocalInput, typeIcon } from "@/lib/format";
 import RichEditor from "./RichEditor";
 import ViewSwitcher from "./ViewSwitcher";
+import { connectGoogleCalendar, createGoogleCalendarEvent, isGcalConnected } from "@/lib/google/calendar";
 
 const EMOJIS = ["📄", "🧠", "🎯", "🚀", "💡", "📌", "📚", "🗂️", "🕸️", "🎓", "⚙️", "🔥", "✨", "📈", "🧩", "🌱"];
 
@@ -126,9 +127,38 @@ function Properties({ item }: { item: ItemNode }) {
       </div>
 
       {item.schedule.start_time && (
-        <p className="prop-hint">
-          {item.schedule.google_event_id ? "Sincronizado com Google Calendar" : "Será sincronizado com o Google Calendar na Fase 3"}
-        </p>
+        <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
+          {item.schedule.google_event_id ? (
+            <span className="gcal-connected-badge">
+              <span className="gcal-dot is-online" /> Sincronizado com Google Calendar
+            </span>
+          ) : isGcalConnected() ? (
+            <button
+              className="btn btn-ghost btn-xs"
+              style={{ color: "#4285f4", display: "inline-flex", alignItems: "center", gap: 4 }}
+              onClick={async () => {
+                const res = await createGoogleCalendarEvent(item);
+                if (res.success && res.google_event_id) {
+                  updateItem(item.id, {
+                    schedule: { ...item.schedule, google_event_id: res.google_event_id },
+                  });
+                } else if (res.error) {
+                  alert(res.error);
+                }
+              }}
+            >
+              📅 Enviar para Google Calendar
+            </button>
+          ) : (
+            <button
+              className="btn btn-ghost btn-xs"
+              style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}
+              onClick={() => connectGoogleCalendar()}
+            >
+              🔗 Conectar Google Calendar para sincronizar
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
