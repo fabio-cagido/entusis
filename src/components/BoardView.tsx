@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Columns2, FileText, KanbanSquare, Layers, X } from "lucide-react";
 import { descendantsOf, useStore } from "@/lib/store";
 import { STATUSES } from "@/lib/types";
@@ -16,10 +16,15 @@ export default function BoardView() {
   const rootId = params.get("root");
   const projectId = params.get("project");
   const grouped = params.get("group") !== "flat";
-  const initialTab = (params.get("tab") as "page" | "kanban" | "split") || "page";
+  const initialTab = (params.get("tab") as "page" | "kanban" | "split") || "kanban";
 
   const [projectTab, setProjectTab] = useState<"page" | "kanban" | "split">(initialTab);
   const [editingTitle, setEditingTitle] = useState(false);
+
+  useEffect(() => {
+    const tab = (params.get("tab") as "page" | "kanban" | "split") || "kanban";
+    setProjectTab(tab);
+  }, [params]);
 
   const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
