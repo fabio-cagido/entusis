@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   description: "Notion + Miro + Google Calendar em uma única base unificada de dados.",
 };
 
+// Opts out of development-only instant-navigation validator
+// because children are conditionally gated by authentication in Providers.
+export const instant = false;
+
 export default function RootLayout({
   children,
 }: Readonly<{
