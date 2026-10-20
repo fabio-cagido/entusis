@@ -2,21 +2,28 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronRight,
   Cloud,
+  Copy,
+  ExternalLink,
   HardDrive,
   KanbanSquare,
-  Moon,
+  Link2,
+  LogOut,
   Monitor,
+  Moon,
+  MoreHorizontal,
   Network,
+  PenLine,
   Plus,
   Search,
+  Star,
   Sun,
   Sunrise,
-  LogOut,
+  Trash2,
 } from "lucide-react";
 import { childrenOf, useStore, viewHref } from "@/lib/store";
 import type { ItemNode } from "@/lib/types";
@@ -24,10 +31,220 @@ import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 
 const DRAG_MIME = "application/x-nodes-flows-id";
 
-function TreeRow({ item, depth }: { item: ItemNode; depth: number }) {
+interface ActionMenuTarget {
+  id: string;
+  type: "project" | "page";
+  title: string;
+  rect: DOMRect;
+}
+
+interface NotionActionMenuProps {
+  target: ActionMenuTarget;
+  isFavorite: boolean;
+  onClose: () => void;
+  onRename: () => void;
+  onShowToast: (msg: string) => void;
+}
+
+function NotionActionMenu({
+  target,
+  isFavorite,
+  onClose,
+  onRename,
+  onShowToast,
+}: NotionActionMenuProps) {
+  const toggleFavorite = useStore((s) => s.toggleFavorite);
+  const duplicateProject = useStore((s) => s.duplicateProject);
+  const duplicateItem = useStore((s) => s.duplicateItem);
+  const deleteProject = useStore((s) => s.deleteProject);
+  const deleteItem = useStore((s) => s.deleteItem);
+  const items = useStore((s) => s.items);
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  useEffect(() => {
+    const menuWidth = 220;
+    const menuHeight = 250;
+    let left = target.rect.right + 6;
+    let top = target.rect.top;
+
+    if (left + menuWidth > window.innerWidth) {
+      left = Math.max(8, target.rect.left - menuWidth - 6);
+    }
+    if (top + menuHeight > window.innerHeight) {
+      top = Math.max(8, window.innerHeight - menuHeight - 12);
+    }
+    setCoords({ top, left });
+  }, [target]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("pointerdown", handleClickOutside);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handleClickOutside);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  const handleToggleFav = () => {
+    toggleFavorite(target.id);
+    onShowToast(isFavorite ? "Removido dos favoritos" : "Adicionado aos favoritos");
+    onClose();
+  };
+
+  const handleCopyLink = () => {
+    const item = items[target.id];
+    const url =
+      target.type === "project"
+        ? `${window.location.origin}/board?project=${target.id}`
+        : `${window.location.origin}${item ? viewHref(item) : `/page/${target.id}`}`;
+    navigator.clipboard.writeText(url);
+    onShowToast("Link copiado para a área de transferência!");
+    onClose();
+  };
+
+  const handleDuplicate = () => {
+    if (target.type === "project") {
+      const clone = duplicateProject(target.id);
+      if (clone) onShowToast(`Projeto duplicado: ${clone.name}`);
+    } else {
+      const clone = duplicateItem(target.id);
+      if (clone) onShowToast(`Página duplicada: ${clone.title || "Sem título"}`);
+    }
+    onClose();
+  };
+
+  const handleRename = () => {
+    onClose();
+    onRename();
+  };
+
+  const handleMoveToTrash = () => {
+    if (target.type === "project") {
+      deleteProject(target.id);
+      onShowToast("Projeto movido para a lixeira");
+      if (pathname === "/board" && params.get("project") === target.id) {
+        router.push("/today");
+      }
+    } else {
+      deleteItem(target.id);
+      onShowToast("Página movida para a lixeira");
+      if (pathname === `/page/${target.id}` || pathname === `/canvas/${target.id}`) {
+        router.push("/today");
+      }
+    }
+    onClose();
+  };
+
+  const handleOpenNewTab = () => {
+    const item = items[target.id];
+    const url =
+      target.type === "project"
+        ? `/board?project=${target.id}`
+        : item
+        ? viewHref(item)
+        : `/page/${target.id}`;
+    window.open(url, "_blank");
+    onClose();
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      className="notion-action-menu"
+      style={{ top: coords.top, left: coords.left }}
+    >
+      <div className="notion-menu-header">
+        {target.type === "project" ? "Database" : "Page"}
+      </div>
+
+      <button className="notion-menu-item" onClick={handleToggleFav}>
+        <span className="notion-menu-icon">
+          <Star
+            size={14}
+            style={{
+              fill: isFavorite ? "#facc15" : "none",
+              color: isFavorite ? "#facc15" : "inherit",
+            }}
+          />
+        </span>
+        <span>{isFavorite ? "Remove from Favorites" : "Add to Favorites"}</span>
+      </button>
+
+      <button className="notion-menu-item" onClick={handleCopyLink}>
+        <span className="notion-menu-icon">
+          <Link2 size={14} />
+        </span>
+        <span>Copy link</span>
+      </button>
+
+      <button className="notion-menu-item" onClick={handleDuplicate}>
+        <span className="notion-menu-icon">
+          <Copy size={14} />
+        </span>
+        <span>Duplicate</span>
+      </button>
+
+      <button className="notion-menu-item" onClick={handleRename}>
+        <span className="notion-menu-icon">
+          <PenLine size={14} />
+        </span>
+        <span>Rename</span>
+      </button>
+
+      <div className="notion-menu-divider" />
+
+      <button className="notion-menu-item is-danger" onClick={handleMoveToTrash}>
+        <span className="notion-menu-icon">
+          <Trash2 size={14} />
+        </span>
+        <span>Move to Trash</span>
+      </button>
+
+      <div className="notion-menu-divider" />
+
+      <button className="notion-menu-item" onClick={handleOpenNewTab}>
+        <span className="notion-menu-icon">
+          <ExternalLink size={14} />
+        </span>
+        <span>Open in new tab</span>
+      </button>
+    </div>
+  );
+}
+
+function TreeRow({
+  item,
+  depth,
+  editingId,
+  setEditingId,
+  onOpenMenu,
+  menuTargetId,
+}: {
+  item: ItemNode;
+  depth: number;
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
+  onOpenMenu: (target: ActionMenuTarget) => void;
+  menuTargetId: string | null;
+}) {
   const items = useStore((s) => s.items);
   const createItem = useStore((s) => s.createItem);
   const moveItem = useStore((s) => s.moveItem);
+  const updateItem = useStore((s) => s.updateItem);
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(depth === 0);
@@ -36,6 +253,7 @@ function TreeRow({ item, depth }: { item: ItemNode; depth: number }) {
   const kids = useMemo(() => childrenOf(items, item.id).filter((c) => c.type === "PAGE"), [items, item.id]);
   const href = viewHref(item);
   const active = pathname === `/page/${item.id}` || pathname === `/canvas/${item.id}`;
+  const isEditing = editingId === item.id;
 
   return (
     <li>
@@ -72,26 +290,79 @@ function TreeRow({ item, depth }: { item: ItemNode; depth: number }) {
         >
           <ChevronRight size={14} />
         </button>
-        <Link href={href} className="tree-link" id={`tree-${item.id}`}>
-          <span className="tree-icon">{item.icon ?? (item.default_view === "CANVAS" ? "🧠" : "📄")}</span>
-          <span className="tree-title">{item.title || "Sem título"}</span>
-        </Link>
-        <button
-          className="tree-add"
-          title="Nova subpágina"
-          onClick={() => {
-            const n = createItem({ parent_id: item.id, title: "", project_id: item.project_id });
-            setOpen(true);
-            router.push(`/page/${n.id}`);
-          }}
-        >
-          <Plus size={14} />
-        </button>
+
+        {isEditing ? (
+          <input
+            autoFocus
+            className="input input-sm"
+            defaultValue={item.title}
+            onBlur={(e) => {
+              updateItem(item.id, { title: e.target.value.trim() || "Sem título" });
+              setEditingId(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") setEditingId(null);
+            }}
+          />
+        ) : (
+          <Link
+            href={href}
+            className="tree-link"
+            id={`tree-${item.id}`}
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              setEditingId(item.id);
+            }}
+          >
+            <span className="tree-icon">{item.icon ?? (item.default_view === "CANVAS" ? "🧠" : "📄")}</span>
+            <span className="tree-title">{item.title || "Sem título"}</span>
+          </Link>
+        )}
+
+        <div className="tree-actions">
+          <button
+            className="tree-add"
+            title="Nova subpágina"
+            onClick={() => {
+              const n = createItem({ parent_id: item.id, title: "", project_id: item.project_id });
+              setOpen(true);
+              router.push(`/page/${n.id}`);
+            }}
+          >
+            <Plus size={14} />
+          </button>
+          <button
+            className={`tree-more-btn ${menuTargetId === item.id ? "is-active" : ""}`}
+            title="Mais opções"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              onOpenMenu({
+                id: item.id,
+                type: "page",
+                title: item.title || "Sem título",
+                rect,
+              });
+            }}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </div>
       </div>
       {open && kids.length > 0 && (
         <ul className="tree">
           {kids.map((k) => (
-            <TreeRow key={k.id} item={k} depth={depth + 1} />
+            <TreeRow
+              key={k.id}
+              item={k}
+              depth={depth + 1}
+              editingId={editingId}
+              setEditingId={setEditingId}
+              onOpenMenu={onOpenMenu}
+              menuTargetId={menuTargetId}
+            />
           ))}
         </ul>
       )}
@@ -99,14 +370,23 @@ function TreeRow({ item, depth }: { item: ItemNode; depth: number }) {
   );
 }
 
-function ProjectList() {
+function ProjectList({
+  editingId,
+  setEditingId,
+  onOpenMenu,
+  menuTargetId,
+}: {
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
+  onOpenMenu: (target: ActionMenuTarget) => void;
+  menuTargetId: string | null;
+}) {
   const projects = useStore((s) => s.projects);
   const items = useStore((s) => s.items);
   const createProject = useStore((s) => s.createProject);
   const updateProject = useStore((s) => s.updateProject);
   const params = useSearchParams();
   const pathname = usePathname();
-  const [editing, setEditing] = useState<string | null>(null);
 
   const list = useMemo(() => Object.values(projects).sort((a, b) => a.sort_order - b.sort_order), [projects]);
   const counts = useMemo(() => {
@@ -125,7 +405,7 @@ function ProjectList() {
           id="add-project"
           className="icon-btn"
           title="Novo projeto"
-          onClick={() => setEditing(createProject({}).id)}
+          onClick={() => setEditingId(createProject({}).id)}
         >
           <Plus size={14} />
         </button>
@@ -133,36 +413,152 @@ function ProjectList() {
       <ul className="tree">
         {list.map((p) => {
           const active = pathname === "/board" && params.get("project") === p.id;
+          const isEditing = editingId === p.id;
           return (
             <li key={p.id}>
-              {editing === p.id ? (
+              {isEditing ? (
                 <input
                   autoFocus
                   className="input input-sm"
                   defaultValue={p.name}
                   onBlur={(e) => {
                     updateProject(p.id, { name: e.target.value.trim() || "Sem nome" });
-                    setEditing(null);
+                    setEditingId(null);
                   }}
-                  onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
                 />
               ) : (
-                <Link
-                  href={`/board?project=${p.id}`}
-                  className={`tree-row tree-link project-row ${active ? "is-active" : ""}`}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    setEditing(p.id);
-                  }}
-                >
-                  <span className="project-dot" style={{ background: p.color }} />
-                  <span className="tree-title">{p.name}</span>
-                  {counts[p.id] ? <span className="count-pill">{counts[p.id]}</span> : null}
-                </Link>
+                <div className={`tree-row project-row ${active ? "is-active" : ""}`}>
+                  <Link
+                    href={`/board?project=${p.id}`}
+                    className="tree-link"
+                    onDoubleClick={(e) => {
+                      e.preventDefault();
+                      setEditingId(p.id);
+                    }}
+                  >
+                    <span className="project-dot" style={{ background: p.color }} />
+                    <span className="tree-title">{p.name}</span>
+                    {counts[p.id] ? <span className="count-pill">{counts[p.id]}</span> : null}
+                  </Link>
+                  <div className="tree-actions">
+                    <button
+                      className={`tree-more-btn ${menuTargetId === p.id ? "is-active" : ""}`}
+                      title="Mais opções"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        onOpenMenu({
+                          id: p.id,
+                          type: "project",
+                          title: p.name,
+                          rect,
+                        });
+                      }}
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </div>
+                </div>
               )}
             </li>
           );
         })}
+      </ul>
+    </section>
+  );
+}
+
+function FavoritesList({
+  onOpenMenu,
+  menuTargetId,
+}: {
+  onOpenMenu: (target: ActionMenuTarget) => void;
+  menuTargetId: string | null;
+}) {
+  const favorites = useStore((s) => s.favorites);
+  const projects = useStore((s) => s.projects);
+  const items = useStore((s) => s.items);
+  const pathname = usePathname();
+  const params = useSearchParams();
+
+  const favoriteEntries = useMemo(() => {
+    return favorites
+      .map((id) => {
+        if (projects[id]) {
+          const p = projects[id];
+          return {
+            id,
+            type: "project" as const,
+            title: p.name,
+            color: p.color,
+            icon: null,
+            href: `/board?project=${id}`,
+            active: pathname === "/board" && params.get("project") === id,
+          };
+        }
+        if (items[id]) {
+          const it = items[id];
+          return {
+            id,
+            type: "page" as const,
+            title: it.title || "Sem título",
+            color: null,
+            icon: it.icon ?? (it.default_view === "CANVAS" ? "🧠" : "📄"),
+            href: viewHref(it),
+            active: pathname === `/page/${id}` || pathname === `/canvas/${id}`,
+          };
+        }
+        return null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }, [favorites, projects, items, pathname, params]);
+
+  if (favoriteEntries.length === 0) return null;
+
+  return (
+    <section className="side-section">
+      <header className="side-heading">
+        <span>Favoritos</span>
+      </header>
+      <ul className="tree">
+        {favoriteEntries.map((f) => (
+          <li key={f.id}>
+            <div className={`tree-row project-row ${f.active ? "is-active" : ""}`}>
+              <Link href={f.href} className="tree-link">
+                {f.type === "project" ? (
+                  <span className="project-dot" style={{ background: f.color || "#8b7bff" }} />
+                ) : (
+                  <span className="tree-icon">{f.icon}</span>
+                )}
+                <span className="tree-title">{f.title}</span>
+              </Link>
+              <div className="tree-actions">
+                <button
+                  className={`tree-more-btn ${menuTargetId === f.id ? "is-active" : ""}`}
+                  title="Mais opções"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    onOpenMenu({
+                      id: f.id,
+                      type: f.type,
+                      title: f.title,
+                      rect,
+                    });
+                  }}
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              </div>
+            </div>
+          </li>
+        ))}
       </ul>
     </section>
   );
@@ -194,7 +590,16 @@ function QuickSearch() {
           {results.map((r) => (
             <li key={r.id}>
               <Link href={viewHref(r)} onClick={() => setQ("")}>
-                <span>{r.icon ?? (r.type === "TASK" ? "☑️" : r.type === "EVENT" ? "📅" : r.type === "MINDMAP_NODE" ? "🔹" : "📄")}</span>
+                <span>
+                  {r.icon ??
+                    (r.type === "TASK"
+                      ? "☑️"
+                      : r.type === "EVENT"
+                      ? "📅"
+                      : r.type === "MINDMAP_NODE"
+                      ? "🔹"
+                      : "📄")}
+                </span>
                 {r.title || "Sem título"}
               </Link>
             </li>
@@ -234,13 +639,18 @@ function ThemeToggle() {
 
 export default function Sidebar() {
   const items = useStore((s) => s.items);
+  const favorites = useStore((s) => s.favorites);
   const repo = useStore((s) => s.repo);
   const sync = useStore((s) => s.sync);
   const createItem = useStore((s) => s.createItem);
   const moveItem = useStore((s) => s.moveItem);
   const pathname = usePathname();
   const router = useRouter();
+
   const [rootOver, setRootOver] = useState(false);
+  const [menuTarget, setMenuTarget] = useState<ActionMenuTarget | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const roots = useMemo(() => childrenOf(items, null).filter((i) => i.type === "PAGE"), [items]);
 
@@ -250,6 +660,11 @@ export default function Sidebar() {
     { href: "/canvas", label: "Mapas mentais", icon: <Network size={16} />, id: "nav-canvas" },
     { href: "/calendar", label: "Agenda", icon: <CalendarDays size={16} />, id: "nav-calendar" },
   ];
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2500);
+  };
 
   return (
     <aside className="sidebar">
@@ -276,7 +691,19 @@ export default function Sidebar() {
 
       <div className="side-scroll">
         <Suspense fallback={null}>
-          <ProjectList />
+          <FavoritesList
+            onOpenMenu={setMenuTarget}
+            menuTargetId={menuTarget?.id ?? null}
+          />
+        </Suspense>
+
+        <Suspense fallback={null}>
+          <ProjectList
+            editingId={editingId}
+            setEditingId={setEditingId}
+            onOpenMenu={setMenuTarget}
+            menuTargetId={menuTarget?.id ?? null}
+          />
         </Suspense>
 
         <section className="side-section">
@@ -326,16 +753,33 @@ export default function Sidebar() {
           </header>
           <ul className="tree">
             {roots.map((r) => (
-              <TreeRow key={r.id} item={r} depth={0} />
+              <TreeRow
+                key={r.id}
+                item={r}
+                depth={0}
+                editingId={editingId}
+                setEditingId={setEditingId}
+                onOpenMenu={setMenuTarget}
+                menuTargetId={menuTarget?.id ?? null}
+              />
             ))}
           </ul>
         </section>
       </div>
 
       <footer className="side-footer">
-        <span className={`sync-badge sync-${sync}`} title={repo?.kind === "supabase" ? "Supabase" : "Armazenamento local"}>
+        <span
+          className={`sync-badge sync-${sync}`}
+          title={repo?.kind === "supabase" ? "Supabase" : "Armazenamento local"}
+        >
           {repo?.kind === "supabase" ? <Cloud size={13} /> : <HardDrive size={13} />}
-          {sync === "saving" ? "Salvando…" : sync === "error" ? "Erro ao salvar" : repo?.kind === "supabase" ? "Sincronizado" : "Local"}
+          {sync === "saving"
+            ? "Salvando…"
+            : sync === "error"
+            ? "Erro ao salvar"
+            : repo?.kind === "supabase"
+            ? "Sincronizado"
+            : "Local"}
         </span>
         <div className="side-footer-actions">
           <ThemeToggle />
@@ -356,6 +800,26 @@ export default function Sidebar() {
           )}
         </div>
       </footer>
+
+      {/* Notion Context Action Menu */}
+      {menuTarget && (
+        <Suspense fallback={null}>
+          <NotionActionMenu
+            target={menuTarget}
+            isFavorite={favorites.includes(menuTarget.id)}
+            onClose={() => setMenuTarget(null)}
+            onRename={() => setEditingId(menuTarget.id)}
+            onShowToast={showToast}
+          />
+        </Suspense>
+      )}
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="notion-toast">
+          <span>{toastMsg}</span>
+        </div>
+      )}
     </aside>
   );
 }

@@ -14,6 +14,7 @@ interface State {
   repo: Repository | null;
   items: Record<string, ItemNode>;
   projects: Record<string, Project>;
+  favorites: string[];
   drawerId: string | null;
   theme: Theme;
   sync: SyncState;
@@ -23,13 +24,16 @@ interface State {
   updateItem(id: string, patch: Partial<ItemNode>): void;
   updateItems(patches: { id: string; patch: Partial<ItemNode> }[]): void;
   deleteItem(id: string): void;
+  duplicateItem(id: string): ItemNode | null;
   moveItem(id: string, parentId: string | null): void;
   toggleLink(a: string, b: string): void;
 
   createProject(p: Partial<Project>): Project;
   updateProject(id: string, patch: Partial<Project>): void;
   deleteProject(id: string): void;
+  duplicateProject(id: string): Project | null;
 
+  toggleFavorite(id: string): void;
   openDrawer(id: string | null): void;
   setTheme(t: Theme): void;
   applyRemote(c: RemoteChange): void;
@@ -96,6 +100,7 @@ export const useStore = create<State>((set, get) => {
     drawerId: null,
     theme: "system",
     sync: "idle",
+    favorites: [],
 
     async init(repo) {
       const r = repo ?? new LocalRepository();
@@ -106,10 +111,18 @@ export const useStore = create<State>((set, get) => {
         await r.upsertItems(snap.items);
       }
       const theme = (typeof window !== "undefined" && (localStorage.getItem("nf-theme") as Theme)) || "system";
+      let favs: string[] = [];
+      try {
+        const rawFavs = typeof window !== "undefined" ? localStorage.getItem("nf-favorites") : null;
+        if (rawFavs) favs = JSON.parse(rawFavs);
+      } catch {
+        favs = [];
+      }
       set({
         repo: r,
         ready: true,
         theme,
+        favorites: favs,
         items: Object.fromEntries(snap.items.map((i) => [i.id, i])),
         projects: Object.fromEntries(snap.projects.map((p) => [p.id, p])),
       });
@@ -171,6 +184,18 @@ export const useStore = create<State>((set, get) => {
       touchItems(relinked);
     },
 
+    duplicateItem(id) {
+      const { items } = get();
+      const orig = items[id];
+      if (!orig) return null;
+      const clone = get().createItem({
+        ...orig,
+        title: `${orig.title || "Sem título"} (cópia)`,
+        sort_order: orig.sort_order + 0.5,
+      });
+      return clone;
+    },
+
     moveItem(id, parentId) {
       const { items } = get();
       // Prevent cycles: target cannot be a descendant of id.
@@ -217,15 +242,57 @@ export const useStore = create<State>((set, get) => {
     },
 
     deleteProject(id) {
-      const { projects, items } = get();
+      const { projects, items, favorites } = get();
       const next = { ...projects };
       delete next[id];
-      set({ projects: next });
+      const nextFavs = favorites.filter((f) => f !== id);
+      set({
+        projects: next,
+        favorites: nextFavs,
+      });
+      if (typeof window !== "undefined") {
+        localStorage.setItem("nf-favorites", JSON.stringify(nextFavs));
+      }
+      // Remove todos os itens vinculados ao projeto ao movê-lo para a lixeira
       const affected = Object.values(items).filter((i) => i.project_id === id);
-      get().updateItems(affected.map((i) => ({ id: i.id, patch: { project_id: null } })));
+      for (const it of affected) {
+        get().deleteItem(it.id);
+      }
       pendingProjects.delete(id);
       pendingProjectDeletes.add(id);
       schedule();
+    },
+
+    duplicateProject(id) {
+      const { projects, items } = get();
+      const orig = projects[id];
+      if (!orig) return null;
+      const clone = get().createProject({
+        name: `${orig.name} (cópia)`,
+        color: orig.color,
+        icon: orig.icon,
+      });
+
+      // Duplica os itens pertencentes ao projeto
+      const projectItems = Object.values(items).filter((i) => i.project_id === id);
+      for (const it of projectItems) {
+        get().createItem({
+          ...it,
+          project_id: clone.id,
+        });
+      }
+      return clone;
+    },
+
+    toggleFavorite(id) {
+      const { favorites } = get();
+      const next = favorites.includes(id)
+        ? favorites.filter((f) => f !== id)
+        : [...favorites, id];
+      set({ favorites: next });
+      if (typeof window !== "undefined") {
+        localStorage.setItem("nf-favorites", JSON.stringify(next));
+      }
     },
 
     openDrawer(id) {
