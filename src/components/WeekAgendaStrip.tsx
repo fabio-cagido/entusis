@@ -335,8 +335,15 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
                         title={`${evt.title || "Sem título"} (${timeStr})${project ? ` · ${project.name}` : ""}`}
                       >
                         <div className="week-event-time">
-                          <Clock size={10} />
+                          <Clock size={9} />
                           <span>{timeStr}</span>
+                          {project && (
+                            <span
+                              className="project-dot"
+                              style={{ background: project.color, width: 6, height: 6, marginLeft: "auto" }}
+                              title={project.name}
+                            />
+                          )}
                           {evt.schedule.google_event_id && (
                             <span className="gcal-event-icon" title="Sincronizado com Google Calendar">G</span>
                           )}
@@ -345,15 +352,6 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
                           <span className="week-event-icon">{typeIcon(evt)}</span>
                           <span className="week-event-text">{evt.title || "Sem título"}</span>
                         </div>
-                        {project && (
-                          <div className="week-event-project">
-                            <span
-                              className="project-dot"
-                              style={{ background: project.color }}
-                            />
-                            <span>{project.name}</span>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -379,18 +377,12 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
                         }}
                       >
                         <div className="week-event-time">
-                          <Clock size={10} />
+                          <Clock size={9} />
                           <span>{timeLabel}</span>
                           <span className="gcal-event-icon" title="Evento do Google Calendar">G</span>
                         </div>
                         <div className="week-event-title">
-                          <span className="week-event-icon">📅</span>
                           <span className="week-event-text">{ge.summary}</span>
-                        </div>
-                        <div className="week-event-project">
-                          <span className="project-dot" style={{ background: "#4285f4" }} />
-                          <span>Google Agenda</span>
-                          {ge.htmlLink && <ExternalLink size={10} style={{ marginLeft: "auto", opacity: 0.6 }} />}
                         </div>
                       </div>
                     );
