@@ -225,7 +225,7 @@ export default function CalendarView() {
             >
               <span className="cal-num">{d.getDate()}</span>
               <div className="cal-events">
-                {list.slice(0, 3).map((it) => {
+                {list.slice(0, 4).map((it) => {
                   const p = it.project_id ? projects[it.project_id] : null;
                   return (
                     <button
@@ -233,16 +233,18 @@ export default function CalendarView() {
                       className={`cal-event ${it.status === "DONE" ? "is-done" : ""}`}
                       style={{ ["--accent" as string]: p?.color ?? "var(--primary)" }}
                       onClick={() => openDrawer(it.id)}
+                      title={`${it.title || "Sem título"}`}
                     >
                       <span className="cal-time">
                         {new Date(it.schedule.start_time!).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                       </span>
-                      {typeIcon(it)} {it.title || "Sem título"}
+                      <span className="cal-icon">{typeIcon(it)}</span>
+                      <span className="cal-text">{it.title || "Sem título"}</span>
                     </button>
                   );
                 })}
 
-                {gList.slice(0, 3).map((ge) => {
+                {gList.slice(0, 4).map((ge) => {
                   let timeStr = "Dia todo";
                   if (ge.start?.dateTime) {
                     timeStr = new Date(ge.start.dateTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -250,21 +252,20 @@ export default function CalendarView() {
                   return (
                     <button
                       key={`gcal-${ge.id}`}
-                      className="cal-event"
-                      style={{ ["--accent" as string]: "#4285f4", background: "rgba(66, 133, 244, 0.12)", borderColor: "rgba(66, 133, 244, 0.3)" }}
+                      className="cal-event is-gcal"
                       onClick={() => {
                         if (ge.htmlLink) window.open(ge.htmlLink, "_blank");
                       }}
                       title={`Google Calendar: ${ge.summary} (${timeStr})`}
                     >
                       <span className="cal-time">{timeStr}</span>
-                      <span style={{ color: "#4285f4", fontWeight: 700, fontSize: "0.7rem", marginRight: 2 }}>G</span>
-                      {ge.summary}
+                      <span className="gcal-event-icon" title="Evento do Google Calendar">G</span>
+                      <span className="cal-text">{ge.summary}</span>
                     </button>
                   );
                 })}
 
-                {totalCount > 4 && <span className="cal-more">+{totalCount - 4}</span>}
+                {totalCount > 4 && <span className="cal-more">+{totalCount - 4} mais</span>}
               </div>
             </div>
           );
