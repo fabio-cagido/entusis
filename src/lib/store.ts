@@ -107,50 +107,6 @@ export const useStore = create<State>((set, get) => {
       const r = repo ?? new LocalRepository();
       let snap = await r.loadAll();
 
-      // Migração automática: se estiver conectando ao Supabase, verifica se há dados antigos
-      // criados offline no LocalStorage e faz o upload automático para a nuvem
-      if (r.kind === "supabase" && typeof window !== "undefined") {
-        try {
-          const rawLocal = window.localStorage.getItem("nodes-flows:v1");
-          if (rawLocal) {
-            const localData = JSON.parse(rawLocal);
-            const localItems: ItemNode[] = Object.values(localData.items || {});
-            const localProjects: Project[] = Object.values(localData.projects || {});
-
-            const existingItemIds = new Set(snap.items.map((i) => i.id));
-            const existingProjectIds = new Set(snap.projects.map((p) => p.id));
-
-            const missingProjects = localProjects.filter((p) => !existingProjectIds.has(p.id));
-            const missingItems = localItems.filter((i) => !existingItemIds.has(i.id));
-
-            if (missingProjects.length > 0 || missingItems.length > 0) {
-              if (missingProjects.length > 0) {
-                await r.upsertProjects(missingProjects);
-                snap.projects.push(...missingProjects);
-              }
-
-              if (missingItems.length > 0) {
-                const localMap = Object.fromEntries(localItems.map((i) => [i.id, i]));
-                const depth = (n: ItemNode) => {
-                  let d = 0;
-                  let p = n.parent_id;
-                  while (p && (localMap[p] || existingItemIds.has(p)) && d < 100) {
-                    d++;
-                    p = localMap[p]?.parent_id ?? null;
-                  }
-                  return d;
-                };
-                missingItems.sort((a, b) => depth(a) - depth(b));
-                await r.upsertItems(missingItems);
-                snap.items.push(...missingItems);
-              }
-            }
-          }
-        } catch (migErr) {
-          console.warn("[êntusis] migração automática de dados locais para o Supabase:", migErr);
-        }
-      }
-
       if (snap.items.length === 0 && snap.projects.length === 0) {
         snap = buildSeed();
         await r.upsertProjects(snap.projects);
@@ -164,11 +120,99 @@ export const useStore = create<State>((set, get) => {
       } catch {
         favs = [];
       }
+
+      // Limpar localStorage legado para não re-duplicar
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("nodes-flows:v1");
+      }
+
       // Garante que todo projeto tem uma página raiz vinculada
       const itemsMap = Object.fromEntries(snap.items.map((i) => [i.id, i]));
       const projectsMap = Object.fromEntries(snap.projects.map((p) => [p.id, p]));
       const touchedItems: string[] = [];
       const touchedProjects: string[] = [];
+
+      // --- DEDUPLICAÇÃO DE PROJETOS DUPLICADOS ---
+      const projectsByName = new Map<string, Project[]>();
+      for (const pr of Object.values(projectsMap)) {
+        const key = pr.name.toLowerCase().trim();
+        const list = projectsByName.get(key) || [];
+        list.push(pr);
+        projectsByName.set(key, list);
+      }
+
+      const projectsToDelete: string[] = [];
+      for (const [, list] of projectsByName.entries()) {
+        if (list.length > 1) {
+          const countItems = (pid: string) => Object.values(itemsMap).filter((it) => it.project_id === pid).length;
+          list.sort((a, b) => countItems(b.id) - countItems(a.id));
+          const primary = list[0];
+          const duplicates = list.slice(1);
+
+          for (const dup of duplicates) {
+            projectsToDelete.push(dup.id);
+            delete projectsMap[dup.id];
+
+            for (const it of Object.values(itemsMap)) {
+              if (it.project_id === dup.id) {
+                it.project_id = primary.id;
+                touchedItems.push(it.id);
+              }
+            }
+          }
+        }
+      }
+
+      // --- DEDUPLICAÇÃO DE PÁGINAS/ITENS DUPLICADOS ---
+      const itemsByKey = new Map<string, ItemNode[]>();
+      for (const it of Object.values(itemsMap)) {
+        const normTitle = it.title.toLowerCase().trim();
+        const key = `${normTitle}__${it.parent_id || "root"}__${it.type}`;
+        const list = itemsByKey.get(key) || [];
+        list.push(it);
+        itemsByKey.set(key, list);
+      }
+
+      const itemsToDelete: string[] = [];
+      for (const [, list] of itemsByKey.entries()) {
+        if (list.length > 1) {
+          const score = (it: ItemNode) => {
+            const childCount = Object.values(itemsMap).filter((c) => c.parent_id === it.id).length;
+            return childCount * 1000 + (it.content?.length || 0);
+          };
+          list.sort((a, b) => score(b) - score(a));
+          const primary = list[0];
+          const duplicates = list.slice(1);
+
+          for (const dup of duplicates) {
+            itemsToDelete.push(dup.id);
+            delete itemsMap[dup.id];
+
+            for (const child of Object.values(itemsMap)) {
+              if (child.parent_id === dup.id) {
+                child.parent_id = primary.id;
+                touchedItems.push(child.id);
+              }
+            }
+          }
+        }
+      }
+
+      // Deletar duplicados permanentemente do repositório
+      if (projectsToDelete.length > 0) {
+        try {
+          await r.deleteProjects(projectsToDelete);
+        } catch (e) {
+          console.warn("[êntusis] falha ao deletar projetos duplicados:", e);
+        }
+      }
+      if (itemsToDelete.length > 0) {
+        try {
+          await r.deleteItems(itemsToDelete);
+        } catch (e) {
+          console.warn("[êntusis] falha ao deletar itens duplicados:", e);
+        }
+      }
 
       for (const pr of Object.values(projectsMap)) {
         if (!pr.page_id || !itemsMap[pr.page_id]) {
