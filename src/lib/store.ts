@@ -106,6 +106,51 @@ export const useStore = create<State>((set, get) => {
     async init(repo) {
       const r = repo ?? new LocalRepository();
       let snap = await r.loadAll();
+
+      // Migração automática: se estiver conectando ao Supabase, verifica se há dados antigos
+      // criados offline no LocalStorage e faz o upload automático para a nuvem
+      if (r.kind === "supabase" && typeof window !== "undefined") {
+        try {
+          const rawLocal = window.localStorage.getItem("nodes-flows:v1");
+          if (rawLocal) {
+            const localData = JSON.parse(rawLocal);
+            const localItems: ItemNode[] = Object.values(localData.items || {});
+            const localProjects: Project[] = Object.values(localData.projects || {});
+
+            const existingItemIds = new Set(snap.items.map((i) => i.id));
+            const existingProjectIds = new Set(snap.projects.map((p) => p.id));
+
+            const missingProjects = localProjects.filter((p) => !existingProjectIds.has(p.id));
+            const missingItems = localItems.filter((i) => !existingItemIds.has(i.id));
+
+            if (missingProjects.length > 0 || missingItems.length > 0) {
+              if (missingProjects.length > 0) {
+                await r.upsertProjects(missingProjects);
+                snap.projects.push(...missingProjects);
+              }
+
+              if (missingItems.length > 0) {
+                const localMap = Object.fromEntries(localItems.map((i) => [i.id, i]));
+                const depth = (n: ItemNode) => {
+                  let d = 0;
+                  let p = n.parent_id;
+                  while (p && (localMap[p] || existingItemIds.has(p)) && d < 100) {
+                    d++;
+                    p = localMap[p]?.parent_id ?? null;
+                  }
+                  return d;
+                };
+                missingItems.sort((a, b) => depth(a) - depth(b));
+                await r.upsertItems(missingItems);
+                snap.items.push(...missingItems);
+              }
+            }
+          }
+        } catch (migErr) {
+          console.warn("[êntusis] migração automática de dados locais para o Supabase:", migErr);
+        }
+      }
+
       if (snap.items.length === 0 && snap.projects.length === 0) {
         snap = buildSeed();
         await r.upsertProjects(snap.projects);
