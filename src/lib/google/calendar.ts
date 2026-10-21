@@ -159,9 +159,9 @@ export function loadGsiScript(): Promise<void> {
 }
 
 /**
- * Uses Google Identity Services token client for instant or silent token requests
+ * Uses Google Identity Services token client for instant token requests (must be triggered by user action)
  */
-export async function requestGoogleCalendarToken(silent = false): Promise<string> {
+export async function requestGoogleCalendarToken(): Promise<string> {
   await loadGsiScript();
   return new Promise((resolve, reject) => {
     const google = (window as any).google;
@@ -169,24 +169,32 @@ export async function requestGoogleCalendarToken(silent = false): Promise<string
       reject(new Error("Google Identity não disponível"));
       return;
     }
-    const client = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CLIENT_ID,
-      scope: GCAL_DEFAULT_SCOPES.join(" "),
-      callback: (response: any) => {
-        if (response.error) {
-          reject(new Error(response.error_description || response.error));
-          return;
-        }
-        if (response.access_token) {
-          setGcalTokens(response.access_token);
-          resolve(response.access_token);
-        } else {
-          reject(new Error("Nenhum access_token recebido do Google"));
-        }
-      },
-    });
-    // If silent, don't show prompt
-    client.requestAccessToken({ prompt: silent ? "" : "select_account" });
+    try {
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: GCAL_DEFAULT_SCOPES.join(" "),
+        callback: (response: any) => {
+          if (response.error) {
+            reject(new Error(response.error_description || response.error));
+            return;
+          }
+          if (response.access_token) {
+            setGcalTokens(response.access_token);
+            resolve(response.access_token);
+          } else {
+            reject(new Error("Nenhum access_token recebido do Google"));
+          }
+        },
+        error_callback: (err: any) => {
+          console.warn("[gcal] GIS error:", err);
+          reject(new Error(err?.message || "Autorização cancelada ou bloqueada"));
+        },
+      });
+      client.requestAccessToken({ prompt: "select_account" });
+    } catch (err: any) {
+      console.warn("[gcal] GIS init failed:", err);
+      reject(err);
+    }
   });
 }
 
@@ -197,7 +205,7 @@ export async function requestGoogleCalendarToken(silent = false): Promise<string
  */
 export async function connectGoogleCalendar(returnUrl = "/today"): Promise<boolean> {
   try {
-    await requestGoogleCalendarToken(false);
+    await requestGoogleCalendarToken();
     return true;
   } catch (gisError) {
     console.warn("[gcal] GIS prompt failed, attempting redirect fallback:", gisError);
@@ -226,25 +234,18 @@ export async function connectGoogleCalendar(returnUrl = "/today"): Promise<boole
 /**
  * Fetches events from primary Google Calendar in given date window.
  * Keeps cached events intact if network/token fails temporarily.
+ * NEVER opens background popups if token is expired.
  */
 export async function fetchGoogleCalendarEvents(
   timeMin: Date,
-  timeMax: Date,
-  retryCount = 0
+  timeMax: Date
 ): Promise<GoogleCalendarEvent[]> {
-  let token = getGcalAccessToken();
+  const token = getGcalAccessToken();
 
-  // If connected but token missing, attempt silent refresh
-  if (!token && isGcalConnected() && retryCount === 0) {
-    try {
-      token = await requestGoogleCalendarToken(true);
-    } catch {
-      // Return cached events on failure
-      return getCachedGcalEvents();
-    }
+  // If no token exists, return cached events without attempting background popups
+  if (!token) {
+    return getCachedGcalEvents();
   }
-
-  if (!token) return getCachedGcalEvents();
 
   try {
     // 1. Try same-origin Next.js proxy route first (immune to Edge tracking prevention & CORS)
@@ -266,15 +267,12 @@ export async function fetchGoogleCalendarEvents(
 
     // 2. If proxy route failed or returned error, try direct Google API
     if (!res || !res.ok) {
-      if (res?.status === 401 && retryCount === 0) {
-        // Token expired (1 hour later). Renew silently!
-        try {
-          const freshToken = await requestGoogleCalendarToken(true);
-          if (freshToken) {
-            return await fetchGoogleCalendarEvents(timeMin, timeMax, retryCount + 1);
-          }
-        } catch (silentErr) {
-          console.warn("[gcal] silent token refresh failed:", silentErr);
+      if (res?.status === 401) {
+        // Token has expired. Remove the expired token and notify UI, but keep cached events!
+        console.warn("[gcal] token expired (401); maintaining cached events until user reconnects");
+        localStorage.removeItem(STORAGE_TOKEN_KEY);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("gcal-status-change"));
         }
         return getCachedGcalEvents();
       }
@@ -293,6 +291,15 @@ export async function fetchGoogleCalendarEvents(
             Accept: "application/json",
           },
         });
+
+        if (res?.status === 401) {
+          console.warn("[gcal] direct googleapis token expired (401); maintaining cached events");
+          localStorage.removeItem(STORAGE_TOKEN_KEY);
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("gcal-status-change"));
+          }
+          return getCachedGcalEvents();
+        }
       } catch (directErr) {
         console.warn("[gcal] direct googleapis request failed:", directErr);
       }
@@ -331,13 +338,15 @@ export async function createGoogleCalendarEvent(item: {
   content?: string;
   schedule: { start_time: string | null; end_time: string | null };
 }): Promise<GoogleSyncResult> {
-  let token = getGcalAccessToken();
-  if (!token && isGcalConnected()) {
-    try {
-      token = await requestGoogleCalendarToken(true);
-    } catch {}
+  const token = getGcalAccessToken();
+  if (!token) {
+    return {
+      success: false,
+      error: isGcalConnected()
+        ? "Sua sessão do Google Agenda expirou após 1 hora. Clique no botão da Agenda para reconectar."
+        : "Google Calendar não conectado",
+    };
   }
-  if (!token) return { success: false, error: "Google Calendar não conectado" };
   if (!item.schedule.start_time) return { success: false, error: "Sem horário agendado" };
 
   try {

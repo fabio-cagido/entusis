@@ -10,6 +10,7 @@ import {
   disconnectGcal,
   fetchGoogleCalendarEvents,
   getCachedGcalEvents,
+  getGcalAccessToken,
   isGcalConnected,
   type GoogleCalendarEvent,
 } from "@/lib/google/calendar";
@@ -156,25 +157,39 @@ export default function CalendarView() {
         </div>
         <div className="view-head-actions">
           {isConnected ? (
-            <div className="gcal-connected-badge" title="Google Calendar Conectado">
-              <span className="gcal-dot is-online" />
-              <span>Google Agenda Conectada</span>
-              <button
-                className="icon-btn-xs"
-                onClick={loadGcal}
-                disabled={isGcalLoading}
-                title="Sincronizar eventos do Google Calendar agora"
-              >
-                <RefreshCw size={11} className={isGcalLoading ? "spin" : ""} />
-              </button>
-              <button
-                className="icon-btn-xs"
-                onClick={handleDisconnect}
-                title="Desconectar Google Agenda"
-              >
-                <Unlink size={11} />
-              </button>
-            </div>
+            (() => {
+              const hasToken = Boolean(getGcalAccessToken());
+              return (
+                <div
+                  className="gcal-connected-badge"
+                  title={hasToken ? "Google Calendar Conectado" : "Sessão expirada. Clique para reconectar"}
+                >
+                  <span className={`gcal-dot ${hasToken ? "is-online" : "is-warning"}`} />
+                  <span>{hasToken ? "Google Agenda Conectada" : "Sessão Expirada"}</span>
+                  <button
+                    className="icon-btn-xs"
+                    onClick={() => {
+                      if (!hasToken) {
+                        handleConnect();
+                      } else {
+                        loadGcal();
+                      }
+                    }}
+                    disabled={isGcalLoading}
+                    title={hasToken ? "Sincronizar eventos do Google Calendar agora" : "Reconectar ao Google Calendar"}
+                  >
+                    <RefreshCw size={11} className={isGcalLoading ? "spin" : ""} />
+                  </button>
+                  <button
+                    className="icon-btn-xs"
+                    onClick={handleDisconnect}
+                    title="Desconectar Google Agenda"
+                  >
+                    <Unlink size={11} />
+                  </button>
+                </div>
+              );
+            })()
           ) : (
             <button
               className="gcal-connect-btn"

@@ -2685,6 +2685,11 @@ li[data-type="taskItem"] > div {
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
 }
 
+.gcal-dot.is-warning {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
 .icon-btn-xs {
   display: inline-flex;
   align-items: center;
