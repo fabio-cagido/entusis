@@ -11,6 +11,7 @@ import {
   Position,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   applyNodeChanges,
   useReactFlow,
   type Connection,
@@ -443,9 +444,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
   }, []);
 
   const onNodeDragStop = useCallback(
-    (_: unknown, __: MindNode, dragged: MindNode[]) => {
+    (_: unknown, node: MindNode, dragged: MindNode[]) => {
+      const targets = dragged && dragged.length > 0 ? dragged : [node];
       updateItems(
-        dragged.map((n) => ({
+        targets.map((n) => ({
           id: n.id,
           patch: { canvas: { ...(items[n.id]?.canvas ?? { x: 0, y: 0 }), x: n.position.x, y: n.position.y } },
         })),
@@ -613,6 +615,12 @@ function MindMapInner({ rootId }: { rootId: string }) {
           onConnect={onConnect}
           onEdgesDelete={onEdgesDelete}
           onPaneClick={() => setEditingId(null)}
+          onPaneContextMenu={(e) => e.preventDefault()}
+          panOnDrag={[1, 2]}
+          selectionOnDrag={true}
+          selectionMode={SelectionMode.Partial}
+          selectionKeyCode={null}
+          multiSelectionKeyCode="Shift"
           deleteKeyCode={null}
           fitView
           fitViewOptions={{ padding: 0.25, maxZoom: 1.1 }}
@@ -620,8 +628,6 @@ function MindMapInner({ rootId }: { rootId: string }) {
           maxZoom={2.5}
           onlyRenderVisibleElements
           proOptions={{ hideAttribution: true }}
-          selectionKeyCode="Shift"
-          multiSelectionKeyCode="Shift"
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} className="canvas-bg" />
           <MiniMap
@@ -673,7 +679,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
           )}
 
           <Panel position="bottom-left" className="canvas-hints">
-            <kbd>Tab</kbd> filho · <kbd>Enter</kbd> irmão · <kbd>F2</kbd> renomear · <kbd>Del</kbd> excluir · arraste das bordas para vincular · <kbd>Shift</kbd>+arrastar seleciona · scroll = zoom
+            <kbd>Botão direito</kbd> arrastar canvas · <kbd>Botão esquerdo</kbd> selecionar vários nós · <kbd>Tab</kbd> filho · <kbd>Enter</kbd> irmão · <kbd>F2</kbd> renomear · <kbd>Del</kbd> excluir · scroll = zoom
           </Panel>
         </ReactFlow>
       </div>

@@ -2946,4 +2946,13 @@ li[data-type="taskItem"] > div {
   background: var(--primary-faint);
 }
 
+/* React Flow Marquee Selection Box */
+.react-flow__selection {
+  background: rgba(139, 123, 255, 0.14) !important;
+  border: 1.5px dashed var(--primary) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 0 16px rgba(139, 123, 255, 0.2) !important;
+  pointer-events: none;
+}
+
 
