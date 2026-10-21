@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
-import { Network, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Network, Plus, Upload } from "lucide-react";
 import { descendantsOf, useStore } from "@/lib/store";
+import ImportMindMapModal from "./ImportMindMapModal";
 
 export default function CanvasIndex() {
   const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
   const createItem = useStore((s) => s.createItem);
   const router = useRouter();
+
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const maps = useMemo(
     () =>
@@ -34,7 +37,19 @@ export default function CanvasIndex() {
           <h1 className="view-title">Mapas mentais</h1>
           <p className="muted">Qualquer página também pode ser aberta como canvas pelo seletor de visão.</p>
         </div>
-        <button id="new-mindmap" className="btn btn-primary" onClick={create}><Plus size={15} /> Novo mapa</button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button
+            id="import-mindmap"
+            className="btn btn-secondary"
+            onClick={() => setIsImportModalOpen(true)}
+            title="Importar mapa mental em formato JSON (Lucidchart, etc.)"
+          >
+            <Upload size={15} /> Importar mapa (JSON)
+          </button>
+          <button id="new-mindmap" className="btn btn-primary" onClick={create}>
+            <Plus size={15} /> Novo mapa
+          </button>
+        </div>
       </header>
       <div className="map-grid">
         {maps.map(({ m, count }) => {
@@ -57,7 +72,21 @@ export default function CanvasIndex() {
           <Plus size={22} />
           <span>Criar mapa mental</span>
         </button>
+        <button
+          className="map-card map-card-new"
+          onClick={() => setIsImportModalOpen(true)}
+          style={{ borderStyle: "dashed" }}
+          title="Importar mapa mental exportado do Lucidchart ou JSON"
+        >
+          <Upload size={22} />
+          <span>Importar JSON</span>
+        </button>
       </div>
+
+      <ImportMindMapModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+      />
     </div>
   );
 }

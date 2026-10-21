@@ -21,6 +21,7 @@ interface State {
 
   init(repo?: Repository): Promise<void>;
   createItem(p: Partial<ItemNode>): ItemNode;
+  addItems(newItems: ItemNode[]): void;
   updateItem(id: string, patch: Partial<ItemNode>): void;
   updateItems(patches: { id: string; patch: Partial<ItemNode> }[]): void;
   deleteItem(id: string): void;
@@ -180,6 +181,16 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ items: { ...s.items, [it.id]: it } }));
       touchItems([it.id]);
       return it;
+    },
+
+    addItems(newItems) {
+      if (!newItems || newItems.length === 0) return;
+      const next = { ...get().items };
+      for (const it of newItems) {
+        next[it.id] = it;
+      }
+      set({ items: next });
+      touchItems(newItems.map((i) => i.id));
     },
 
     updateItem(id, patch) {
