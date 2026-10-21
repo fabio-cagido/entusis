@@ -26,6 +26,7 @@ interface ImportMindMapModalProps {
 export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapModalProps) {
   const router = useRouter();
   const addItems = useStore((s) => s.addItems);
+  const projects = useStore((s) => s.projects);
 
   const [activeTab, setActiveTab] = useState<"file" | "paste">("file");
   const [jsonText, setJsonText] = useState("");
@@ -133,10 +134,12 @@ export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapMod
       const finalTitle = customTitle.trim() || parsedMap.title;
       // Update root title if customized
       const nodesToInsert = parsedMap.nodes.map((node) => {
+        // Keep project links only if that project exists in this account (FK safety).
+        const project_id = node.project_id && projects[node.project_id] ? node.project_id : null;
         if (node.id === parsedMap.root.id) {
-          return { ...node, title: finalTitle };
+          return { ...node, project_id, title: finalTitle };
         }
-        return node;
+        return { ...node, project_id };
       });
 
       // Insert all nodes into the global store & repository

@@ -502,22 +502,33 @@ function isEntusisExport(doc: any): boolean {
 function parseEntusisExport(doc: any): ParsedMindMap {
   const rawList: ItemNode[] = Array.isArray(doc) ? doc : doc.items;
   if (rawList.length === 0) throw new Error("A lista de nós exportada está vazia.");
+  const t = now();
 
   // Remap IDs to avoid collision with existing database
   const idMap = new Map<string, string>();
   rawList.forEach((it) => idMap.set(it.id, uid()));
 
-  // Find root
-  let rootOrig = rawList.find((it) => !it.parent_id || it.default_view === "CANVAS") || rawList[0];
+  // Find root: explicit root_id (written by the exporter) wins.
+  const rootOrig =
+    (!Array.isArray(doc) && typeof doc.root_id === "string" && rawList.find((it) => it.id === doc.root_id)) ||
+    rawList.find((it) => !it.parent_id || it.default_view === "CANVAS") ||
+    rawList[0];
   const rootId = idMap.get(rootOrig.id)!;
 
-  const nodes = rawList.map((it) => {
+  const nodes: ItemNode[] = rawList.map((it) => {
     const isRoot = it.id === rootOrig.id;
     return {
       ...it,
       id: idMap.get(it.id)!,
       parent_id: isRoot ? null : it.parent_id ? idMap.get(it.parent_id) || rootId : rootId,
       default_view: isRoot ? ("CANVAS" as const) : it.default_view,
+      // Internal links follow the new IDs; links to items outside the file are dropped.
+      links: (it.links ?? []).map((l) => idMap.get(l)).filter((l): l is string => Boolean(l)),
+      attachments: it.attachments ?? [],
+      // The copy is not the same Google Calendar event as the original.
+      schedule: { ...(it.schedule ?? emptySchedule()), google_event_id: null },
+      created_at: t,
+      updated_at: t,
     };
   });
 

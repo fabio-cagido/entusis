@@ -25,6 +25,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
   FileText,
   KanbanSquare,
@@ -43,6 +44,7 @@ import { STATUS_LABEL } from "@/lib/types";
 import type { ItemNode } from "@/lib/types";
 import { COL_W, ROW_H, layoutTree } from "@/lib/layout";
 import { formatWhen, typeIcon } from "@/lib/format";
+import { downloadMindMapJson } from "@/lib/exporters/mindmap";
 import ViewSwitcher from "./ViewSwitcher";
 
 const PALETTE = ["#8b7bff", "#f472b6", "#38bdf8", "#2dd4bf", "#facc15", "#fb923c", "#a3e635", "#94a3b8"];
@@ -311,6 +313,18 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [nodes, setNodes] = useState<MindNode[]>([]);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+
+  const exportJson = useCallback(() => {
+    try {
+      const n = downloadMindMapJson(useStore.getState().items, rootId);
+      setExportMsg(`${n} nós exportados`);
+    } catch (err) {
+      console.warn("[export] falha ao exportar mapa:", err);
+      setExportMsg("Falha ao exportar");
+    }
+    setTimeout(() => setExportMsg(null), 2500);
+  }, [rootId]);
 
   const root = items[rootId];
 
@@ -653,6 +667,14 @@ function MindMapInner({ rootId }: { rootId: string }) {
             </button>
             <button className="btn btn-ghost btn-xs" onClick={() => rf.fitView({ duration: 400, padding: 0.2 })} title="Enquadrar tudo">
               <Maximize size={14} />
+            </button>
+            <button
+              id="canvas-export-json"
+              className="btn btn-ghost btn-xs"
+              onClick={exportJson}
+              title="Exportar mapa como JSON (pode ser reimportado sem perdas)"
+            >
+              <Download size={14} /> {exportMsg ?? "Exportar JSON"}
             </button>
           </Panel>
 
