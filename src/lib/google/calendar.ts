@@ -247,22 +247,26 @@ export async function fetchGoogleCalendarEvents(
   if (!token) return getCachedGcalEvents();
 
   try {
-    const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
-    url.searchParams.set("timeMin", timeMin.toISOString());
-    url.searchParams.set("timeMax", timeMax.toISOString());
-    url.searchParams.set("singleEvents", "true");
-    url.searchParams.set("orderBy", "startTime");
-    url.searchParams.set("maxResults", "100");
+    // 1. Try same-origin Next.js proxy route first (immune to Edge tracking prevention & CORS)
+    let res: Response | null = null;
+    try {
+      const proxyUrl = new URL("/api/gcal/events", typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+      proxyUrl.searchParams.set("timeMin", timeMin.toISOString());
+      proxyUrl.searchParams.set("timeMax", timeMax.toISOString());
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+      res = await fetch(proxyUrl.toString(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
+    } catch (proxyErr) {
+      console.warn("[gcal] proxy route request failed, trying direct googleapis:", proxyErr);
+    }
 
-    if (!res.ok) {
-      if (res.status === 401 && retryCount === 0) {
+    // 2. If proxy route failed or returned error, try direct Google API
+    if (!res || !res.ok) {
+      if (res?.status === 401 && retryCount === 0) {
         // Token expired (1 hour later). Renew silently!
         try {
           const freshToken = await requestGoogleCalendarToken(true);
@@ -272,8 +276,30 @@ export async function fetchGoogleCalendarEvents(
         } catch (silentErr) {
           console.warn("[gcal] silent token refresh failed:", silentErr);
         }
+        return getCachedGcalEvents();
       }
-      // On any error, return cached events rather than wiping them!
+
+      try {
+        const directUrl = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+        directUrl.searchParams.set("timeMin", timeMin.toISOString());
+        directUrl.searchParams.set("timeMax", timeMax.toISOString());
+        directUrl.searchParams.set("singleEvents", "true");
+        directUrl.searchParams.set("orderBy", "startTime");
+        directUrl.searchParams.set("maxResults", "100");
+
+        res = await fetch(directUrl.toString(), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        });
+      } catch (directErr) {
+        console.warn("[gcal] direct googleapis request failed:", directErr);
+      }
+    }
+
+    if (!res || !res.ok) {
+      console.warn("[gcal] events fetch unavailable, serving cached events");
       return getCachedGcalEvents();
     }
 
@@ -291,7 +317,8 @@ export async function fetchGoogleCalendarEvents(
     setCachedGcalEvents(fetched);
     return fetched;
   } catch (err) {
-    console.error("[gcal] fetch error:", err);
+    // Graceful fallback with console.warn (avoids Next.js Turbopack dev error modal)
+    console.warn("[gcal] fetch error caught safely:", err);
     return getCachedGcalEvents();
   }
 }
@@ -326,14 +353,31 @@ export async function createGoogleCalendarEvent(item: {
       end: { dateTime: endTime.toISOString() },
     };
 
-    const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    // Try same-origin proxy first
+    let res: Response | null = null;
+    try {
+      res = await fetch("/api/gcal/events", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // ignore, fallback to direct
+    }
+
+    if (!res || !res.ok) {
+      res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    }
 
     if (!res.ok) {
       const err = await res.text();
