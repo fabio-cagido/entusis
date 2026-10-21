@@ -9,6 +9,7 @@ import {
   connectGoogleCalendar,
   disconnectGcal,
   fetchGoogleCalendarEvents,
+  getCachedGcalEvents,
   isGcalConnected,
   type GoogleCalendarEvent,
 } from "@/lib/google/calendar";
@@ -27,9 +28,9 @@ export default function CalendarView() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
 
-  const [isConnected, setIsConnected] = useState(false);
+  const [isConnected, setIsConnected] = useState(() => isGcalConnected());
   const [isGcalLoading, setIsGcalLoading] = useState(false);
-  const [gcalEvents, setGcalEvents] = useState<GoogleCalendarEvent[]>([]);
+  const [gcalEvents, setGcalEvents] = useState<GoogleCalendarEvent[]>(() => getCachedGcalEvents());
 
   const days = useMemo(() => {
     const start = new Date(cursor);
@@ -71,8 +72,21 @@ export default function CalendarView() {
       loadGcal();
     };
 
+    const handleFocus = () => {
+      if (isGcalConnected()) loadGcal();
+    };
+
+    const timer = setInterval(() => {
+      if (isGcalConnected()) loadGcal();
+    }, 45000);
+
     window.addEventListener("gcal-status-change", handleStatus);
-    return () => window.removeEventListener("gcal-status-change", handleStatus);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("gcal-status-change", handleStatus);
+      window.removeEventListener("focus", handleFocus);
+      clearInterval(timer);
+    };
   }, [loadGcal]);
 
   const byDay = useMemo(() => {

@@ -3,12 +3,11 @@ import { getSupabase } from "../supabase/client";
 /**
  * Google Calendar Integration Module
  *
- * Provides bidirectional sync:
- * - Google Identity Services (instant popup OAuth token client)
- * - OAuth2 fallback via Supabase
- * - Token storage & auto-detection from URL hash
- * - Fetching events from Google Calendar API v3
- * - Mapping between Google Events and êntusis ItemNode
+ * Provides robust bidirectional sync:
+ * - Persistent connection flag and cached events in localStorage
+ * - Silent token renewal (via Google Identity Services)
+ * - Auto-fetch on window focus and periodic background sync
+ * - Token extraction from URL hash and Supabase session
  */
 
 export const GOOGLE_CLIENT_ID =
@@ -56,30 +55,57 @@ export interface GoogleSyncResult {
   error?: string;
 }
 
+const STORAGE_TOKEN_KEY = "gcal_access_token";
+const STORAGE_REFRESH_KEY = "gcal_refresh_token";
+const STORAGE_CONNECTED_KEY = "gcal_connected";
+const STORAGE_CACHE_KEY = "gcal_cached_events";
+
 export function getGcalAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("gcal_access_token");
+  return localStorage.getItem(STORAGE_TOKEN_KEY);
+}
+
+export function getCachedGcalEvents(): GoogleCalendarEvent[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setCachedGcalEvents(events: GoogleCalendarEvent[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_CACHE_KEY, JSON.stringify(events));
+  } catch (e) {
+    console.warn("[gcal] failed to cache events:", e);
+  }
 }
 
 export function setGcalTokens(access: string, refresh?: string | null) {
   if (typeof window === "undefined") return;
-  localStorage.setItem("gcal_access_token", access);
-  if (refresh) localStorage.setItem("gcal_refresh_token", refresh);
+  localStorage.setItem(STORAGE_TOKEN_KEY, access);
+  localStorage.setItem(STORAGE_CONNECTED_KEY, "true");
+  if (refresh) localStorage.setItem(STORAGE_REFRESH_KEY, refresh);
   localStorage.setItem("gcal_connected_at", Date.now().toString());
-  // Dispatch a custom event so components can update immediately
   window.dispatchEvent(new Event("gcal-status-change"));
 }
 
 export function disconnectGcal() {
   if (typeof window === "undefined") return;
-  localStorage.removeItem("gcal_access_token");
-  localStorage.removeItem("gcal_refresh_token");
+  localStorage.removeItem(STORAGE_TOKEN_KEY);
+  localStorage.removeItem(STORAGE_REFRESH_KEY);
+  localStorage.removeItem(STORAGE_CONNECTED_KEY);
+  localStorage.removeItem(STORAGE_CACHE_KEY);
   localStorage.removeItem("gcal_connected_at");
   window.dispatchEvent(new Event("gcal-status-change"));
 }
 
 export function isGcalConnected(): boolean {
-  return Boolean(getGcalAccessToken());
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(STORAGE_CONNECTED_KEY) === "true" || Boolean(getGcalAccessToken());
 }
 
 /**
@@ -100,7 +126,6 @@ export function checkUrlForGoogleTokens() {
   }
 }
 
-// Check tokens immediately on module import
 if (typeof window !== "undefined") {
   checkUrlForGoogleTokens();
 }
@@ -134,9 +159,9 @@ export function loadGsiScript(): Promise<void> {
 }
 
 /**
- * Uses Google Identity Services token client for instant popup authentication
+ * Uses Google Identity Services token client for instant or silent token requests
  */
-export async function requestGoogleCalendarToken(): Promise<string> {
+export async function requestGoogleCalendarToken(silent = false): Promise<string> {
   await loadGsiScript();
   return new Promise((resolve, reject) => {
     const google = (window as any).google;
@@ -160,22 +185,22 @@ export async function requestGoogleCalendarToken(): Promise<string> {
         }
       },
     });
-    // Request access token (since permission was already given, Google returns token instantly)
-    client.requestAccessToken({ prompt: "" });
+    // If silent, don't show prompt
+    client.requestAccessToken({ prompt: silent ? "" : "select_account" });
   });
 }
 
 /**
  * Connects Google Calendar:
- * 1. Tries Google Identity Services (GIS) instant popup token
- * 2. Falls back to Supabase OAuth redirect if needed
+ * 1. Tries Google Identity Services (GIS) token client
+ * 2. Falls back to Supabase OAuth redirect if popup blocked
  */
 export async function connectGoogleCalendar(returnUrl = "/today"): Promise<boolean> {
   try {
-    await requestGoogleCalendarToken();
+    await requestGoogleCalendarToken(false);
     return true;
   } catch (gisError) {
-    console.warn("[gcal] GIS popup failed or was blocked, falling back to redirect:", gisError);
+    console.warn("[gcal] GIS prompt failed, attempting redirect fallback:", gisError);
 
     const sb = getSupabase();
     if (!sb) throw new Error("Supabase não configurado");
@@ -199,11 +224,27 @@ export async function connectGoogleCalendar(returnUrl = "/today"): Promise<boole
 }
 
 /**
- * Fetches events from primary Google Calendar in given date window
+ * Fetches events from primary Google Calendar in given date window.
+ * Keeps cached events intact if network/token fails temporarily.
  */
-export async function fetchGoogleCalendarEvents(timeMin: Date, timeMax: Date): Promise<GoogleCalendarEvent[]> {
-  const token = getGcalAccessToken();
-  if (!token) return [];
+export async function fetchGoogleCalendarEvents(
+  timeMin: Date,
+  timeMax: Date,
+  retryCount = 0
+): Promise<GoogleCalendarEvent[]> {
+  let token = getGcalAccessToken();
+
+  // If connected but token missing, attempt silent refresh
+  if (!token && isGcalConnected() && retryCount === 0) {
+    try {
+      token = await requestGoogleCalendarToken(true);
+    } catch {
+      // Return cached events on failure
+      return getCachedGcalEvents();
+    }
+  }
+
+  if (!token) return getCachedGcalEvents();
 
   try {
     const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
@@ -221,18 +262,23 @@ export async function fetchGoogleCalendarEvents(timeMin: Date, timeMax: Date): P
     });
 
     if (!res.ok) {
-      if (res.status === 401) {
-        // Token expired or invalid
-        disconnectGcal();
-        return [];
+      if (res.status === 401 && retryCount === 0) {
+        // Token expired (1 hour later). Renew silently!
+        try {
+          const freshToken = await requestGoogleCalendarToken(true);
+          if (freshToken) {
+            return await fetchGoogleCalendarEvents(timeMin, timeMax, retryCount + 1);
+          }
+        } catch (silentErr) {
+          console.warn("[gcal] silent token refresh failed:", silentErr);
+        }
       }
-      const errText = await res.text();
-      console.warn("[gcal] failed to fetch events:", errText);
-      return [];
+      // On any error, return cached events rather than wiping them!
+      return getCachedGcalEvents();
     }
 
     const data = await res.json();
-    return (data.items || []).map((e: any) => ({
+    const fetched: GoogleCalendarEvent[] = (data.items || []).map((e: any) => ({
       id: e.id,
       summary: e.summary || "Sem título",
       description: e.description || "",
@@ -240,9 +286,13 @@ export async function fetchGoogleCalendarEvents(timeMin: Date, timeMax: Date): P
       end: e.end,
       htmlLink: e.htmlLink,
     }));
+
+    // Update persistent cache
+    setCachedGcalEvents(fetched);
+    return fetched;
   } catch (err) {
     console.error("[gcal] fetch error:", err);
-    return [];
+    return getCachedGcalEvents();
   }
 }
 
@@ -254,7 +304,12 @@ export async function createGoogleCalendarEvent(item: {
   content?: string;
   schedule: { start_time: string | null; end_time: string | null };
 }): Promise<GoogleSyncResult> {
-  const token = getGcalAccessToken();
+  let token = getGcalAccessToken();
+  if (!token && isGcalConnected()) {
+    try {
+      token = await requestGoogleCalendarToken(true);
+    } catch {}
+  }
   if (!token) return { success: false, error: "Google Calendar não conectado" };
   if (!item.schedule.start_time) return { success: false, error: "Sem horário agendado" };
 

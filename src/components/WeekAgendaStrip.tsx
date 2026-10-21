@@ -21,6 +21,7 @@ import {
   connectGoogleCalendar,
   disconnectGcal,
   fetchGoogleCalendarEvents,
+  getCachedGcalEvents,
   isGcalConnected,
   type GoogleCalendarEvent,
 } from "@/lib/google/calendar";
@@ -36,10 +37,10 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
   const [collapsed, setCollapsed] = useState(false);
   const [dayOffset, setDayOffset] = useState(0); // 0 = a partir de hoje
 
-  // Google Calendar Integration State
-  const [gcalEvents, setGcalEvents] = useState<GoogleCalendarEvent[]>([]);
+  // Google Calendar Integration State (inicia com eventos do cache persistente para nunca sumir no refresh)
+  const [gcalEvents, setGcalEvents] = useState<GoogleCalendarEvent[]>(() => getCachedGcalEvents());
   const [isGcalLoading, setIsGcalLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
+  const [isConnected, setIsConnected] = useState(() => isGcalConnected());
 
   // 7 dias consecutivos começando do dia atual + offset
   const days = useMemo(() => {
@@ -90,8 +91,23 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
       loadGcalEvents();
     };
 
+    // Atualiza automaticamente quando o usuário retorna à aba (após adicionar evento no Google Agenda)
+    const handleFocus = () => {
+      if (isGcalConnected()) loadGcalEvents();
+    };
+
+    // Sincronização periódica em segundo plano a cada 45 segundos
+    const timer = setInterval(() => {
+      if (isGcalConnected()) loadGcalEvents();
+    }, 45000);
+
     window.addEventListener("gcal-status-change", handleStatusChange);
-    return () => window.removeEventListener("gcal-status-change", handleStatusChange);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("gcal-status-change", handleStatusChange);
+      window.removeEventListener("focus", handleFocus);
+      clearInterval(timer);
+    };
   }, [loadGcalEvents]);
 
   // Mapeia os itens agendados para os 7 dias
@@ -125,8 +141,13 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
 
     for (const ge of gcalEvents) {
       if (!ge.start?.dateTime && !ge.start?.date) continue;
-      const d = new Date(ge.start.dateTime || `${ge.start.date}T00:00:00`);
-      const k = toKey(d);
+      let k: string;
+      if (ge.start.date) {
+        k = ge.start.date;
+      } else {
+        const d = new Date(ge.start.dateTime!);
+        k = toKey(d);
+      }
       if (map.has(k)) {
         map.get(k)!.push(ge);
       }
