@@ -38,24 +38,24 @@ export function parseMindMapJson(raw: string | object): ParsedMindMap {
     throw new Error("O arquivo JSON está vazio ou não contém um objeto válido.");
   }
 
-  // 1. Lucidchart MindMap format
+  // 1. Êntusis exported items { format: "entusis.mindmap", items: [...], edges: [...] }
+  if (isEntusisExport(doc)) {
+    return parseEntusisExport(doc);
+  }
+
+  // 2. Lucidchart MindMap format
   if (isLucidchart(doc)) {
     return parseLucidchart(doc);
   }
 
-  // 2. Generic Tree structure { title/name, children: [...] }
+  // 3. Generic Tree structure { title/name, children: [...] }
   if (isGenericTree(doc)) {
     return parseGenericTree(doc);
   }
 
-  // 3. Nodes and Edges graph { nodes: [...], edges: [...] }
+  // 4. Nodes and Edges graph { nodes: [...], edges: [...] }
   if (isNodesAndEdges(doc)) {
     return parseNodesAndEdges(doc);
-  }
-
-  // 4. Êntusis exported items { items: [...] } or array of ItemNode
-  if (isEntusisExport(doc)) {
-    return parseEntusisExport(doc);
   }
 
   throw new Error(
@@ -494,6 +494,7 @@ function parseNodesAndEdges(doc: any): ParsedMindMap {
 /* ================================================================== */
 
 function isEntusisExport(doc: any): boolean {
+  if (doc?.format === "entusis.mindmap" || doc?.format === "entusis.canvas") return true;
   if (Array.isArray(doc)) return doc.every((d) => d && typeof d.id === "string" && typeof d.title === "string");
   if (Array.isArray(doc.items)) return doc.items.every((d: any) => d && typeof d.id === "string");
   return false;
@@ -515,18 +516,56 @@ function parseEntusisExport(doc: any): ParsedMindMap {
     rawList[0];
   const rootId = idMap.get(rootOrig.id)!;
 
+  // Build link set per node from both item.links and doc.edges/doc.connections
+  const linksMap = new Map<string, Set<string>>();
+  rawList.forEach((it) => {
+    const set = new Set<string>();
+    (it.links ?? []).forEach((l) => {
+      const remapped = idMap.get(l);
+      if (remapped) set.add(remapped);
+    });
+    linksMap.set(it.id, set);
+  });
+
+  // Also ingest any edges/connections from doc.edges or doc.connections
+  const rawEdges = Array.isArray(doc.edges) ? doc.edges : Array.isArray(doc.connections) ? doc.connections : [];
+  rawEdges.forEach((e: any) => {
+    const from = e.fromNodeId || e.source || e.from;
+    const to = e.toNodeId || e.target || e.to;
+    if (from && to && idMap.has(from) && idMap.has(to)) {
+      const set = linksMap.get(from) || new Set<string>();
+      set.add(idMap.get(to)!);
+      linksMap.set(from, set);
+    }
+  });
+
   const nodes: ItemNode[] = rawList.map((it) => {
     const isRoot = it.id === rootOrig.id;
+    const newId = idMap.get(it.id)!;
+    const remappedParent = it.parent_id ? idMap.get(it.parent_id) : null;
+
     return {
       ...it,
-      id: idMap.get(it.id)!,
-      parent_id: isRoot ? null : it.parent_id ? idMap.get(it.parent_id) || rootId : rootId,
+      id: newId,
+      // Se for a raiz do mapa: parent_id = null
+      // Se for nó de processo ou filho sem pai mapeado: associa à raiz do mapa para garantir exibição no canvas
+      parent_id: isRoot ? null : remappedParent || rootId,
       default_view: isRoot ? ("CANVAS" as const) : it.default_view,
-      // Internal links follow the new IDs; links to items outside the file are dropped.
-      links: (it.links ?? []).map((l) => idMap.get(l)).filter((l): l is string => Boolean(l)),
+      // Links remapeados garantindo todas as conexões de setas de processos
+      links: Array.from(linksMap.get(it.id) || []),
       attachments: it.attachments ?? [],
-      // The copy is not the same Google Calendar event as the original.
       schedule: { ...(it.schedule ?? emptySchedule()), google_event_id: null },
+      // Preservação fiel de geometria, dimensões, forma de processo e cores
+      canvas: it.canvas
+        ? {
+            x: Number(it.canvas.x) || 0,
+            y: Number(it.canvas.y) || 0,
+            color: it.canvas.color ?? null,
+            shape: it.canvas.shape ?? null,
+            width: it.canvas.width ? Number(it.canvas.width) : null,
+            height: it.canvas.height ? Number(it.canvas.height) : null,
+          }
+        : null,
       created_at: t,
       updated_at: t,
     };
@@ -534,14 +573,17 @@ function parseEntusisExport(doc: any): ParsedMindMap {
 
   const root = nodes.find((n) => n.id === rootId)!;
 
+  const processCount = nodes.filter((n) => n.canvas?.shape).length;
+  const treeBranchCount = nodes.filter((n) => n.parent_id === rootId && !n.canvas?.shape).length;
+
   return {
     title: root.title,
     root,
     nodes,
     summary: {
       totalNodes: nodes.length,
-      branchesCount: nodes.filter((n) => n.parent_id === rootId).length,
-      source: "Backup Êntusis",
+      branchesCount: treeBranchCount,
+      source: processCount > 0 ? `Backup Êntusis (${processCount} processos)` : "Backup Êntusis",
     },
   };
 }

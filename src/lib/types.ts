@@ -40,10 +40,15 @@ export interface Attachment {
   kind: AttachmentKind;
 }
 
+export type ProcessShape = "rectangle" | "diamond" | "circle";
+
 export interface CanvasMeta {
   x: number;
   y: number;
   color?: string | null;
+  shape?: ProcessShape | null;
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface ItemNode {
