@@ -53,6 +53,7 @@ export interface CanvasMeta {
 
 export interface ItemNode {
   id: string;
+  user_id?: string;
   title: string;
   /** Rich text body (HTML produced by the editor). */
   content: string;
@@ -85,6 +86,17 @@ export interface Project {
   created_at: string;
   page_id?: string | null;
   is_archived?: boolean;
+}
+
+export type SharePermission = "read" | "write";
+
+export interface ItemShare {
+  id: string;
+  item_id: string;
+  invited_email: string;
+  permission: SharePermission;
+  created_by: string;
+  created_at: string;
 }
 
 export const emptySchedule = (): Schedule => ({

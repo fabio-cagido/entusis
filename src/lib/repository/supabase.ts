@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ItemNode, Project } from "../types";
+import type { ItemNode, ItemShare, Project } from "../types";
 import type { RemoteChange, Repository, Snapshot } from "./types";
 
 /* Row shapes in Postgres (schedule and links are flattened / normalised). */
@@ -35,7 +35,7 @@ const toRow = (n: ItemNode, userId: string): ItemRow => {
   const nowIso = new Date().toISOString();
   return {
     id: n.id,
-    user_id: userId,
+    user_id: n.user_id && UUID_RE.test(n.user_id) ? n.user_id : userId,
     title: typeof n.title === "string" ? n.title : "",
     content: typeof n.content === "string" ? n.content : "",
     icon: n.icon ?? null,
@@ -59,6 +59,7 @@ const toRow = (n: ItemNode, userId: string): ItemRow => {
 
 const fromRow = (r: ItemRow): ItemNode => ({
   id: r.id,
+  user_id: r.user_id,
   title: r.title ?? "",
   content: r.content ?? "",
   icon: r.icon,
@@ -115,13 +116,16 @@ export class SupabaseRepository implements Repository {
   }
 
   async loadAll(): Promise<Snapshot> {
-    const [itemRows, projectRows] = await Promise.all([
+    const [itemRows, projectRows, shareRows] = await Promise.all([
       this.fetchAllRows<ItemRow>("item_nodes"),
       this.fetchAllRows<Project>("projects"),
+      this.fetchAllRows<ItemShare>("item_node_shares").catch(() => [] as ItemShare[]),
     ]);
     return {
       items: itemRows.map(fromRow),
       projects: projectRows,
+      shares: shareRows,
+      currentUserId: this.userId,
     };
   }
 
@@ -201,6 +205,17 @@ export class SupabaseRepository implements Repository {
             onChange({ table: "projects", kind: "delete", id: (payload.old as Project).id });
           } else {
             onChange({ table: "projects", kind: "upsert", record: payload.new as Project });
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "item_node_shares" },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            onChange({ table: "shares", kind: "delete", id: (payload.old as ItemShare).id });
+          } else {
+            onChange({ table: "shares", kind: "upsert", record: payload.new as ItemShare });
           }
         },
       )

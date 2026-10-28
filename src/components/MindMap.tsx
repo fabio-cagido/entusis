@@ -43,6 +43,8 @@ import {
   Plus,
   Square,
   Trash2,
+  UserPlus,
+  Users,
   Wand2,
   Workflow,
 } from "lucide-react";
@@ -737,6 +739,17 @@ function MindMapInner({ rootId }: { rootId: string }) {
   }, [rootId]);
 
   const root = items[rootId];
+  const openShareModal = useStore((s) => s.openShareModal);
+  const shares = useStore((s) => s.shares);
+  const currentUserId = useStore((s) => s.currentUserId);
+
+  const rootShareCount = useMemo(
+    () => Object.values(shares).filter((s) => s.item_id === rootId).length,
+    [shares, rootId]
+  );
+  const isSharedWithMe = Boolean(
+    root?.user_id && currentUserId && root.user_id !== currentUserId
+  );
 
   /* ---- scope: nós da árvore hierárquica (exclui formas de processo) ---- */
   const mindScope = useMemo(
@@ -1615,10 +1628,25 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
           <Panel position="top-left" className="canvas-panel glass">
             <span className="canvas-root-title">{typeIcon(root)} {root.title || "Sem título"}</span>
+            {(isSharedWithMe || rootShareCount > 0) && (
+              <span className="shared-badge" title={isSharedWithMe ? "Compartilhado com você" : `Compartilhado com ${rootShareCount} pessoa(s)`}>
+                <Users size={11} />
+                <span>Compartilhado</span>
+              </span>
+            )}
             <ViewSwitcher id={root.id} />
           </Panel>
 
           <Panel position="top-right" className="canvas-panel glass" style={{ overflow: "visible" }}>
+            <button
+              id="canvas-share-btn"
+              className="btn btn-primary btn-xs"
+              onClick={() => openShareModal(rootId)}
+              title="Compartilhar mapa mental por e-mail"
+            >
+              <UserPlus size={14} /> Compartilhar{rootShareCount > 0 ? ` (${rootShareCount})` : ""}
+            </button>
+
             <button id="canvas-add-child" className="btn btn-ghost btn-xs" onClick={() => addChild(selectedIds[0] ?? rootId)} title="Novo ramo (Tab)">
               <Plus size={14} /> Ramo
             </button>

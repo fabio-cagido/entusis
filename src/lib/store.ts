@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { ItemNode, Project } from "./types";
+import type { ItemNode, ItemShare, Project } from "./types";
 import type { Repository, RemoteChange } from "./repository/types";
 import { LocalRepository } from "./repository/local";
 import { buildSeed, newItem } from "./seed";
@@ -12,10 +12,13 @@ type SyncState = "idle" | "saving" | "error";
 interface State {
   ready: boolean;
   repo: Repository | null;
+  currentUserId: string | null;
   items: Record<string, ItemNode>;
   projects: Record<string, Project>;
+  shares: Record<string, ItemShare>;
   favorites: string[];
   drawerId: string | null;
+  shareModalItemId: string | null;
   theme: Theme;
   sync: SyncState;
   syncError: string | null;
@@ -40,6 +43,9 @@ interface State {
 
   toggleFavorite(id: string): void;
   openDrawer(id: string | null): void;
+  openShareModal(id: string | null): void;
+  upsertShareLocal(share: ItemShare): void;
+  removeShareLocal(shareId: string): void;
   setTheme(t: Theme): void;
   toggleSidebar(): void;
   setSidebarCollapsed(collapsed: boolean): void;
@@ -164,9 +170,12 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     repo: null,
+    currentUserId: null,
     items: {},
     projects: {},
+    shares: {},
     drawerId: null,
+    shareModalItemId: null,
     theme: "system",
     sync: "idle",
     syncError: null,
@@ -322,14 +331,18 @@ export const useStore = create<State>((set, get) => {
             }
           }
 
+          const sharesMap = Object.fromEntries((snap.shares ?? []).map((sh) => [sh.id, sh]));
+
           set({
             repo: r,
+            currentUserId: snap.currentUserId ?? null,
             ready: true,
             theme,
             sidebarCollapsed,
             favorites: favs,
             items: itemsMap,
             projects: projectsMap,
+            shares: sharesMap,
           });
 
           if (touchedItems.length > 0) touchItems(touchedItems);
@@ -342,9 +355,16 @@ export const useStore = create<State>((set, get) => {
     },
 
     createItem(p) {
-      const siblings = Object.values(get().items).filter((i) => i.parent_id === (p.parent_id ?? null));
+      const state = get();
+      const siblings = Object.values(state.items).filter((i) => i.parent_id === (p.parent_id ?? null));
       const maxOrder = siblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
-      const it = newItem({ sort_order: maxOrder + 1, ...p });
+      const inheritedUserId =
+        (p.parent_id && state.items[p.parent_id]?.user_id) || state.currentUserId || undefined;
+      const it = newItem({
+        sort_order: maxOrder + 1,
+        ...(inheritedUserId ? { user_id: inheritedUserId } : {}),
+        ...p,
+      });
       set((s) => ({ items: { ...s.items, [it.id]: it } }));
       touchItems([it.id]);
       return it;
@@ -604,6 +624,24 @@ export const useStore = create<State>((set, get) => {
       set({ drawerId: id });
     },
 
+    openShareModal(id) {
+      set({ shareModalItemId: id });
+    },
+
+    upsertShareLocal(share) {
+      set((s) => ({
+        shares: { ...s.shares, [share.id]: share },
+      }));
+    },
+
+    removeShareLocal(shareId) {
+      set((s) => {
+        const next = { ...s.shares };
+        delete next[shareId];
+        return { shares: next };
+      });
+    },
+
     setTheme(t) {
       localStorage.setItem("nf-theme", t);
       document.documentElement.dataset.theme = t;
@@ -638,6 +676,17 @@ export const useStore = create<State>((set, get) => {
           const r = c.record as ItemNode;
           const cur = get().items[r.id];
           if (!cur || cur.updated_at < r.updated_at) set((s) => ({ items: { ...s.items, [r.id]: r } }));
+        }
+      } else if (c.table === "shares") {
+        if (c.kind === "delete" && c.id) {
+          set((s) => {
+            const shares = { ...s.shares };
+            delete shares[c.id!];
+            return { shares };
+          });
+        } else if (c.record) {
+          const sh = c.record as ItemShare;
+          set((s) => ({ shares: { ...s.shares, [sh.id]: sh } }));
         }
       } else {
         if (c.kind === "delete" && c.id) {

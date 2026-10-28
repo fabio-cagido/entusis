@@ -31,11 +31,14 @@ import {
   Sun,
   Sunrise,
   Trash2,
+  UserPlus,
+  Users,
   X,
 } from "lucide-react";
 import { childrenOf, useStore, viewHref } from "@/lib/store";
 import type { ItemNode, Project } from "@/lib/types";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+import ShareMindMapModal from "./ShareMindMapModal";
 
 const DRAG_MIME = "application/x-nodes-flows-id";
 
@@ -69,6 +72,7 @@ function NotionActionMenu({
   const projects = useStore((s) => s.projects);
   const createItem = useStore((s) => s.createItem);
   const updateProject = useStore((s) => s.updateProject);
+  const openShareModal = useStore((s) => s.openShareModal);
   const items = useStore((s) => s.items);
 
   const router = useRouter();
@@ -202,6 +206,21 @@ function NotionActionMenu({
         <span>Copy link</span>
       </button>
 
+      {target.type === "page" && (
+        <button
+          className="notion-menu-item"
+          onClick={() => {
+            onClose();
+            openShareModal(target.id);
+          }}
+        >
+          <span className="notion-menu-icon">
+            <UserPlus size={14} />
+          </span>
+          <span>Compartilhar</span>
+        </button>
+      )}
+
       <button className="notion-menu-item" onClick={handleDuplicate}>
         <span className="notion-menu-icon">
           <Copy size={14} />
@@ -332,6 +351,13 @@ function TreeRow({
   const [over, setOver] = useState(false);
 
   const kids = useMemo(() => childrenOf(items, item.id).filter((c) => c.type === "PAGE"), [items, item.id]);
+  const shares = useStore((s) => s.shares);
+  const currentUserId = useStore((s) => s.currentUserId);
+  const isSharedWithMe = Boolean(item.user_id && currentUserId && item.user_id !== currentUserId);
+  const hasShares = useMemo(
+    () => Object.values(shares).some((s) => s.item_id === item.id),
+    [shares, item.id]
+  );
   const href = viewHref(item);
   const active = pathname === `/page/${item.id}` || pathname === `/canvas/${item.id}`;
   const isEditing = editingId === item.id;
@@ -398,6 +424,14 @@ function TreeRow({
           >
             <span className="tree-icon">{item.icon ?? (item.default_view === "CANVAS" ? "🧠" : "📄")}</span>
             <span className="tree-title">{item.title || "Sem título"}</span>
+            {(isSharedWithMe || hasShares) && (
+              <span
+                className="shared-badge"
+                title={isSharedWithMe ? "Compartilhado com você" : "Compartilhado"}
+              >
+                Compartilhado
+              </span>
+            )}
           </Link>
         )}
 
@@ -794,10 +828,17 @@ export default function Sidebar() {
   }, [toggleSidebar]);
 
   const projects = useStore((s) => s.projects);
+  const currentUserId = useStore((s) => s.currentUserId);
 
   const roots = useMemo(
     () => childrenOf(items, null).filter((i) => i.type === "PAGE"),
     [items]
+  );
+
+  const sharedWithMeRoots = useMemo(
+    () =>
+      roots.filter((r) => Boolean(r.user_id && currentUserId && r.user_id !== currentUserId)),
+    [roots, currentUserId]
   );
 
   const mindMapsCount = useMemo(
@@ -986,6 +1027,31 @@ export default function Sidebar() {
             ))}
           </ul>
         </section>
+
+        {sharedWithMeRoots.length > 0 && (
+          <section className="side-section">
+            <header className="side-heading">
+              <span className="side-heading-label">
+                <Users size={12} />
+                <span>Compartilhados comigo</span>
+                <span className="count-pill">{sharedWithMeRoots.length}</span>
+              </span>
+            </header>
+            <ul className="tree">
+              {sharedWithMeRoots.map((r) => (
+                <TreeRow
+                  key={`shared-${r.id}`}
+                  item={r}
+                  depth={0}
+                  editingId={editingId}
+                  setEditingId={setEditingId}
+                  onOpenMenu={setMenuTarget}
+                  menuTargetId={menuTarget?.id ?? null}
+                />
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
 
       <footer className="side-footer">
@@ -1072,6 +1138,9 @@ export default function Sidebar() {
           </button>
         </div>
       )}
+
+      {/* Modal de Compartilhamento por E-mail */}
+      <ShareMindMapModal />
     </>
   );
 }

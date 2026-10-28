@@ -1,14 +1,16 @@
-import type { ItemNode, Project } from "../types";
+import type { ItemNode, ItemShare, Project } from "../types";
 
 export interface Snapshot {
   items: ItemNode[];
   projects: Project[];
+  shares?: ItemShare[];
+  currentUserId?: string | null;
 }
 
 export interface RemoteChange {
-  table: "items" | "projects";
+  table: "items" | "projects" | "shares";
   kind: "upsert" | "delete";
-  record?: ItemNode | Project;
+  record?: ItemNode | Project | ItemShare;
   id?: string;
 }
 

@@ -3,17 +3,28 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Network, Plus, Upload } from "lucide-react";
+import { Network, Plus, Upload, UserPlus, Users } from "lucide-react";
 import { descendantsOf, useStore } from "@/lib/store";
 import ImportMindMapModal from "./ImportMindMapModal";
 
 export default function CanvasIndex() {
   const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
+  const shares = useStore((s) => s.shares);
+  const currentUserId = useStore((s) => s.currentUserId);
+  const openShareModal = useStore((s) => s.openShareModal);
   const createItem = useStore((s) => s.createItem);
   const router = useRouter();
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  const shareCountByItem = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of Object.values(shares)) {
+      counts[s.item_id] = (counts[s.item_id] ?? 0) + 1;
+    }
+    return counts;
+  }, [shares]);
 
   const maps = useMemo(
     () =>
@@ -54,13 +65,35 @@ export default function CanvasIndex() {
       <div className="map-grid">
         {maps.map(({ m, count }) => {
           const p = m.project_id ? projects[m.project_id] : null;
+          const isSharedWithMe = Boolean(m.user_id && currentUserId && m.user_id !== currentUserId);
+          const shareCount = shareCountByItem[m.id] ?? 0;
           return (
             <Link key={m.id} href={`/canvas/${m.id}`} className="map-card glass" style={{ ["--accent" as string]: m.canvas?.color ?? p?.color ?? "var(--primary)" }}>
               <div className="map-card-art">
                 <Network size={34} />
+                <button
+                  type="button"
+                  className="map-card-share-btn icon-btn"
+                  title="Compartilhar mapa mental"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openShareModal(m.id);
+                  }}
+                >
+                  <UserPlus size={14} />
+                </button>
               </div>
               <div className="map-card-body">
-                <h3>{m.icon ?? "🧠"} {m.title || "Sem título"}</h3>
+                <div className="map-card-title-row">
+                  <h3>{m.icon ?? "🧠"} {m.title || "Sem título"}</h3>
+                  {(isSharedWithMe || shareCount > 0) && (
+                    <span className="shared-badge">
+                      <Users size={11} />
+                      <span>Compartilhado</span>
+                    </span>
+                  )}
+                </div>
                 <p className="muted small">
                   {count} nós{p ? ` · ${p.name}` : ""} · editado {new Date(m.updated_at).toLocaleDateString("pt-BR")}
                 </p>
