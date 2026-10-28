@@ -2,12 +2,14 @@
 
 import { create } from "zustand";
 import type { ItemNode, ItemShare, Project } from "./types";
+import { WEEKDAY_LABEL } from "./types";
 import type { Repository, RemoteChange } from "./repository/types";
 import { LocalRepository } from "./repository/local";
 import { buildSeed, newItem } from "./seed";
 
 type Theme = "system" | "light" | "dark";
 type SyncState = "idle" | "saving" | "error";
+export type TodayTaskFilter = "all" | "doing";
 
 interface State {
   ready: boolean;
@@ -23,8 +25,10 @@ interface State {
   sync: SyncState;
   syncError: string | null;
   sidebarCollapsed: boolean;
+  todayTaskFilter: TodayTaskFilter;
 
   init(repo?: Repository): Promise<void>;
+  checkRecurringTasks(): number;
   createItem(p: Partial<ItemNode>): ItemNode;
   addItems(newItems: ItemNode[]): Promise<void>;
   flushNow(): Promise<void>;
@@ -49,6 +53,7 @@ interface State {
   setTheme(t: Theme): void;
   toggleSidebar(): void;
   setSidebarCollapsed(collapsed: boolean): void;
+  setTodayTaskFilter(filter: TodayTaskFilter): void;
   applyRemote(c: RemoteChange): void;
 }
 
@@ -181,6 +186,7 @@ export const useStore = create<State>((set, get) => {
     syncError: null,
     favorites: [],
     sidebarCollapsed: false,
+    todayTaskFilter: "doing",
 
     async init(repo) {
       if (initPromise) {
@@ -200,6 +206,12 @@ export const useStore = create<State>((set, get) => {
           const theme = (typeof window !== "undefined" && (localStorage.getItem("nf-theme") as Theme)) || "system";
           const sidebarCollapsed =
             typeof window !== "undefined" && localStorage.getItem("entusis_sidebar_collapsed") === "true";
+          const rawTodayFilter =
+            typeof window !== "undefined"
+              ? localStorage.getItem("entusis_today_task_filter")?.toLowerCase()
+              : null;
+          const todayTaskFilter: TodayTaskFilter =
+            rawTodayFilter === "all" || rawTodayFilter === "doing" ? rawTodayFilter : "doing";
           let favs: string[] = [];
           try {
             const rawFavs = typeof window !== "undefined" ? localStorage.getItem("nf-favorites") : null;
@@ -339,6 +351,7 @@ export const useStore = create<State>((set, get) => {
             ready: true,
             theme,
             sidebarCollapsed,
+            todayTaskFilter,
             favorites: favs,
             items: itemsMap,
             projects: projectsMap,
@@ -346,12 +359,80 @@ export const useStore = create<State>((set, get) => {
           });
 
           if (touchedItems.length > 0) touchItems(touchedItems);
+
+          // Executa verificação automática de tarefas recorrentes na hidratação inicial
+          get().checkRecurringTasks();
         } finally {
           initPromise = null;
         }
       })();
 
       return initPromise;
+    },
+
+    checkRecurringTasks() {
+      const { items, projects } = get();
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const dayOfMonth = now.getDate();
+      const dayOfWeek = now.getDay();
+      const todayKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(dayOfMonth).padStart(2, "0")}`;
+      const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
+      const nowIso = now.toISOString();
+
+      const patches: { id: string; patch: Partial<ItemNode> }[] = [];
+
+      for (const it of Object.values(items)) {
+        if (!it.is_recurring || !it.recurrence_type) continue;
+        // Ignorar tarefas cujo projeto esteja arquivado
+        if (it.project_id && projects[it.project_id]?.is_archived) continue;
+
+        let matchesToday = false;
+        if (it.recurrence_type === "monthly" && typeof it.recurrence_day_of_month === "number") {
+          const targetDay = Math.min(Math.max(1, it.recurrence_day_of_month), daysInCurrentMonth);
+          matchesToday = dayOfMonth === targetDay;
+        } else if (it.recurrence_type === "weekly" && typeof it.recurrence_day_of_week === "number") {
+          matchesToday = dayOfWeek === it.recurrence_day_of_week;
+        }
+
+        if (!matchesToday) continue;
+
+        // Verifica se last_recurred_at já corresponde à data local de hoje (YYYY-MM-DD)
+        if (it.last_recurred_at) {
+          const lastDate = new Date(it.last_recurred_at);
+          if (!Number.isNaN(lastDate.getTime())) {
+            const lastKey = `${lastDate.getFullYear()}-${String(lastDate.getMonth() + 1).padStart(2, "0")}-${String(lastDate.getDate()).padStart(2, "0")}`;
+            if (lastKey === todayKey) continue;
+          } else if (it.last_recurred_at.slice(0, 10) === todayKey) {
+            continue;
+          }
+        }
+
+        if (it.status !== "DOING") {
+          patches.push({
+            id: it.id,
+            patch: {
+              status: "DOING",
+              is_today: true,
+              last_recurred_at: nowIso,
+            },
+          });
+        } else {
+          // Mesmo já estando em DOING, registra last_recurred_at hoje para evitar re-disparo se for concluída mais tarde no mesmo dia
+          patches.push({
+            id: it.id,
+            patch: {
+              last_recurred_at: nowIso,
+            },
+          });
+        }
+      }
+
+      if (patches.length > 0) {
+        get().updateItems(patches);
+      }
+      return patches.length;
     },
 
     createItem(p) {
@@ -663,6 +744,14 @@ export const useStore = create<State>((set, get) => {
       set({ sidebarCollapsed: collapsed });
     },
 
+    setTodayTaskFilter(filter) {
+      const normalized: TodayTaskFilter = filter === "all" ? "all" : "doing";
+      if (typeof window !== "undefined") {
+        localStorage.setItem("entusis_today_task_filter", normalized);
+      }
+      set({ todayTaskFilter: normalized });
+    },
+
     applyRemote(c) {
       // Ignore echoes of records we are about to write ourselves.
       if (c.table === "items") {
@@ -773,4 +862,19 @@ export function viewHref(it: Pick<ItemNode, "id" | "default_view">): string {
   if (it.default_view === "CANVAS") return `/canvas/${it.id}`;
   if (it.default_view === "BOARD") return `/board?root=${it.id}`;
   return `/page/${it.id}`;
+}
+
+export function formatRecurrenceSummary(
+  it: Pick<ItemNode, "is_recurring" | "recurrence_type" | "recurrence_day_of_month" | "recurrence_day_of_week">,
+): string | null {
+  if (!it.is_recurring) return null;
+  if (it.recurrence_type === "monthly") {
+    const day = it.recurrence_day_of_month ?? 1;
+    return `Tarefa recorrente: Mensal (todo dia ${day})`;
+  }
+  if (it.recurrence_type === "weekly") {
+    const dow = typeof it.recurrence_day_of_week === "number" ? it.recurrence_day_of_week : 1;
+    return `Tarefa recorrente: Semanal (${WEEKDAY_LABEL[dow] ?? "Segunda-feira"})`;
+  }
+  return "Tarefa recorrente";
 }

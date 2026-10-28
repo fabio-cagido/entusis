@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpDown,
@@ -12,11 +12,12 @@ import {
   LayoutGrid,
   Maximize2,
   Plus,
+  Repeat,
   Search,
   Sparkles,
   X,
 } from "lucide-react";
-import { isToday, useStore } from "@/lib/store";
+import { formatRecurrenceSummary, isToday, useStore } from "@/lib/store";
 import type { ItemNode, Project, Status } from "@/lib/types";
 import KanbanBoard, { type Lane } from "./KanbanBoard";
 import { WeekAgendaStrip } from "./WeekAgendaStrip";
@@ -226,7 +227,17 @@ function ProjectViewCard({
             >
               {statusIcon(item.status)}
             </button>
-            <span className="notion-task-title">{item.title || "Sem título"}</span>
+            <span className="notion-task-title">
+              {item.title || "Sem título"}
+              {item.is_recurring && (
+                <span
+                  className="recurring-indicator"
+                  title={formatRecurrenceSummary(item) ?? "Tarefa recorrente"}
+                >
+                  <Repeat size={11} />
+                </span>
+              )}
+            </span>
             {item.schedule.start_time && (
               <span className="notion-task-time">
                 <Clock size={10} />
@@ -285,9 +296,23 @@ export default function TodayView() {
   const createItem = useStore((s) => s.createItem);
   const updateItem = useStore((s) => s.updateItem);
   const openDrawer = useStore((s) => s.openDrawer);
+  const checkRecurringTasks = useStore((s) => s.checkRecurringTasks);
+  const globalFilter = useStore((s) => s.todayTaskFilter);
+  const setGlobalFilter = useStore((s) => s.setTodayTaskFilter);
+
+  useEffect(() => {
+    checkRecurringTasks();
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("entusis_today_task_filter")?.toLowerCase();
+      if (saved === "all" || saved === "doing") {
+        setGlobalFilter(saved);
+      } else {
+        setGlobalFilter("doing");
+      }
+    }
+  }, [checkRecurringTasks, setGlobalFilter]);
 
   const [layoutMode, setLayoutMode] = useState<"grid" | "kanban">("grid");
-  const [globalFilter, setGlobalFilter] = useState<"ALL" | "DOING">("ALL");
 
   const todays = useMemo(
     () =>
@@ -310,7 +335,7 @@ export default function TodayView() {
   const itemsByProject = useMemo(() => {
     const map = new Map<string, ItemNode[]>();
     for (const it of todays) {
-      if (globalFilter === "DOING" && it.status !== "DOING") continue;
+      if (globalFilter === "doing" && it.status !== "DOING") continue;
       const key = it.project_id || "none";
       const arr = map.get(key) || [];
       arr.push(it);
@@ -323,7 +348,7 @@ export default function TodayView() {
     createItem({
       title,
       type: "TASK",
-      status,
+      status: globalFilter === "doing" ? "DOING" : status,
       is_today: true,
       project_id: projectId,
     });
@@ -372,14 +397,14 @@ export default function TodayView() {
           {/* Alternador Global Rápido: Todas x Fazendo */}
           <div className="segmented segmented-sm">
             <button
-              className={globalFilter === "ALL" ? "is-active" : ""}
-              onClick={() => setGlobalFilter("ALL")}
+              className={globalFilter === "all" ? "is-active" : ""}
+              onClick={() => setGlobalFilter("all")}
             >
               Todas
             </button>
             <button
-              className={globalFilter === "DOING" ? "is-active" : ""}
-              onClick={() => setGlobalFilter("DOING")}
+              className={globalFilter === "doing" ? "is-active" : ""}
+              onClick={() => setGlobalFilter("doing")}
             >
               <span className="notion-status-icon notion-status-doing" style={{ width: 12, height: 12 }}>
                 <span className="status-symbol">!</span>

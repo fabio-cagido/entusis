@@ -14,6 +14,11 @@ interface ItemRow {
   project_id: string | null;
   status: ItemNode["status"];
   is_today: boolean;
+  is_recurring?: boolean;
+  recurrence_type?: ItemNode["recurrence_type"];
+  recurrence_day_of_month?: number | null;
+  recurrence_day_of_week?: number | null;
+  last_recurred_at?: string | null;
   start_time: string | null;
   end_time: string | null;
   google_event_id: string | null;
@@ -30,10 +35,54 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const VALID_TYPES = new Set<ItemNode["type"]>(["PAGE", "MINDMAP_NODE", "TASK", "EVENT"]);
 const VALID_STATUSES = new Set<NonNullable<ItemNode["status"]>>(["BACKLOG", "TODO", "DOING", "DONE"]);
 const VALID_VIEWS = new Set<ItemNode["default_view"]>(["PAGE", "CANVAS", "BOARD"]);
+const VALID_RECURRENCE = new Set<NonNullable<ItemNode["recurrence_type"]>>(["monthly", "weekly"]);
 
-const toRow = (n: ItemNode, userId: string): ItemRow => {
+const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemRow => {
   const nowIso = new Date().toISOString();
-  return {
+  const isRecurring = Boolean(n.is_recurring);
+  const recurrenceType =
+    isRecurring && n.recurrence_type && VALID_RECURRENCE.has(n.recurrence_type)
+      ? n.recurrence_type
+      : null;
+  const recurrenceDayOfMonth =
+    isRecurring &&
+    recurrenceType === "monthly" &&
+    typeof n.recurrence_day_of_month === "number" &&
+    n.recurrence_day_of_month >= 1 &&
+    n.recurrence_day_of_month <= 31
+      ? Math.trunc(n.recurrence_day_of_month)
+      : null;
+  const recurrenceDayOfWeek =
+    isRecurring &&
+    recurrenceType === "weekly" &&
+    typeof n.recurrence_day_of_week === "number" &&
+    n.recurrence_day_of_week >= 0 &&
+    n.recurrence_day_of_week <= 6
+      ? Math.trunc(n.recurrence_day_of_week)
+      : null;
+  const lastRecurredAt = n.last_recurred_at || null;
+
+  // Store recurrence metadata inside canvas JSONB as well so it works seamlessly even before SQL migration 0003 is run.
+  let canvasPayload: ItemNode["canvas"] = n.canvas ? { ...n.canvas } : null;
+  if (isRecurring || lastRecurredAt) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      recurrence: {
+        is_recurring: isRecurring,
+        recurrence_type: recurrenceType,
+        recurrence_day_of_month: recurrenceDayOfMonth,
+        recurrence_day_of_week: recurrenceDayOfWeek,
+        last_recurred_at: lastRecurredAt,
+      },
+    };
+  } else if (canvasPayload?.recurrence) {
+    const { recurrence: _removed, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
+  const baseRow: ItemRow = {
     id: n.id,
     user_id: n.user_id && UUID_RE.test(n.user_id) ? n.user_id : userId,
     title: typeof n.title === "string" ? n.title : "",
@@ -49,38 +98,65 @@ const toRow = (n: ItemNode, userId: string): ItemRow => {
     google_event_id: n.schedule?.google_event_id || null,
     attachments: Array.isArray(n.attachments) ? n.attachments : [],
     links: Array.isArray(n.links) ? n.links.filter((l) => typeof l === "string" && UUID_RE.test(l)) : [],
-    canvas: n.canvas ?? null,
+    canvas: canvasPayload,
     default_view: VALID_VIEWS.has(n.default_view) ? n.default_view : "PAGE",
     sort_order: typeof n.sort_order === "number" && Number.isFinite(n.sort_order) ? n.sort_order : 0,
     created_at: n.created_at || nowIso,
     updated_at: n.updated_at || nowIso,
   };
+
+  if (includeRecurrenceCols) {
+    baseRow.is_recurring = isRecurring;
+    baseRow.recurrence_type = recurrenceType;
+    baseRow.recurrence_day_of_month = recurrenceDayOfMonth;
+    baseRow.recurrence_day_of_week = recurrenceDayOfWeek;
+    baseRow.last_recurred_at = lastRecurredAt;
+  }
+
+  return baseRow;
 };
 
-const fromRow = (r: ItemRow): ItemNode => ({
-  id: r.id,
-  user_id: r.user_id,
-  title: r.title ?? "",
-  content: r.content ?? "",
-  icon: r.icon,
-  type: r.type,
-  parent_id: r.parent_id,
-  project_id: r.project_id,
-  status: r.status,
-  is_today: !!r.is_today,
-  schedule: {
-    start_time: r.start_time,
-    end_time: r.end_time,
-    google_event_id: r.google_event_id,
-  },
-  attachments: r.attachments ?? [],
-  links: r.links ?? [],
-  canvas: r.canvas,
-  default_view: r.default_view ?? "PAGE",
-  sort_order: r.sort_order ?? 0,
-  created_at: r.created_at,
-  updated_at: r.updated_at,
-});
+const fromRow = (r: ItemRow): ItemNode => {
+  const recMeta = r.canvas?.recurrence;
+  const isRecurring =
+    typeof r.is_recurring === "boolean" ? r.is_recurring : Boolean(recMeta?.is_recurring);
+  const recurrenceType = r.recurrence_type ?? recMeta?.recurrence_type ?? null;
+  const recurrenceDayOfMonth =
+    r.recurrence_day_of_month ?? recMeta?.recurrence_day_of_month ?? null;
+  const recurrenceDayOfWeek =
+    r.recurrence_day_of_week ?? recMeta?.recurrence_day_of_week ?? null;
+  const lastRecurredAt = r.last_recurred_at ?? recMeta?.last_recurred_at ?? null;
+
+  return {
+    id: r.id,
+    user_id: r.user_id,
+    title: r.title ?? "",
+    content: r.content ?? "",
+    icon: r.icon,
+    type: r.type,
+    parent_id: r.parent_id,
+    project_id: r.project_id,
+    status: r.status,
+    is_today: !!r.is_today,
+    is_recurring: isRecurring,
+    recurrence_type: recurrenceType,
+    recurrence_day_of_month: recurrenceDayOfMonth,
+    recurrence_day_of_week: recurrenceDayOfWeek,
+    last_recurred_at: lastRecurredAt,
+    schedule: {
+      start_time: r.start_time,
+      end_time: r.end_time,
+      google_event_id: r.google_event_id,
+    },
+    attachments: r.attachments ?? [],
+    links: r.links ?? [],
+    canvas: r.canvas,
+    default_view: r.default_view ?? "PAGE",
+    sort_order: r.sort_order ?? 0,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+};
 
 export class SupabaseRepository implements Repository {
   readonly kind = "supabase" as const;
@@ -131,11 +207,18 @@ export class SupabaseRepository implements Repository {
 
   async upsertItems(items: ItemNode[]) {
     if (!items.length) return;
-    const rows = items.map((i) => toRow(i, this.userId));
+    const rows = items.map((i) => toRow(i, this.userId, true));
     for (let i = 0; i < rows.length; i += SupabaseRepository.CHUNK_SIZE) {
       const chunk = rows.slice(i, i + SupabaseRepository.CHUNK_SIZE);
       const { error } = await this.client.from("item_nodes").upsert(chunk);
-      if (error) throw error;
+      if (error) {
+        // Fallback if migration 0003_recurring_tasks.sql has not been applied yet on Supabase
+        const fallbackChunk = items
+          .slice(i, i + SupabaseRepository.CHUNK_SIZE)
+          .map((item) => toRow(item, this.userId, false));
+        const { error: fallbackError } = await this.client.from("item_nodes").upsert(fallbackChunk);
+        if (fallbackError) throw fallbackError;
+      }
     }
   }
 

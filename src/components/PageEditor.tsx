@@ -12,13 +12,14 @@ import {
   KanbanSquare,
   Link2,
   Plus,
+  Repeat,
   Sunrise,
   Trash2,
   X,
 } from "lucide-react";
 import { ancestorsOf, childrenOf, useStore, viewHref } from "@/lib/store";
-import { ITEM_TYPES, STATUSES, STATUS_LABEL, TYPE_LABEL } from "@/lib/types";
-import type { Attachment, ItemNode, ItemType, Status } from "@/lib/types";
+import { ITEM_TYPES, STATUSES, STATUS_LABEL, TYPE_LABEL, WEEKDAY_LABEL } from "@/lib/types";
+import type { Attachment, ItemNode, ItemType, RecurrenceType, Status } from "@/lib/types";
 import { detectAttachmentKind, formatWhen, fromLocalInput, toLocalInput, typeIcon } from "@/lib/format";
 import RichEditor from "./RichEditor";
 import ViewSwitcher from "./ViewSwitcher";
@@ -125,6 +126,117 @@ function Properties({ item }: { item: ItemNode }) {
           <Sunrise size={13} /> {item.is_today ? "No dashboard" : "Adicionar"}
         </button>
       </div>
+
+      <div className="prop">
+        <span className="prop-label">Recorrência</span>
+        <button
+          id="prop-recurring-toggle"
+          type="button"
+          className={`chip-toggle ${item.is_recurring ? "is-on" : ""}`}
+          onClick={() => {
+            const nextRecurring = !item.is_recurring;
+            if (nextRecurring) {
+              const now = new Date();
+              const recType: RecurrenceType = item.recurrence_type ?? "monthly";
+              updateItem(item.id, {
+                is_recurring: true,
+                recurrence_type: recType,
+                recurrence_day_of_month:
+                  recType === "monthly" ? (item.recurrence_day_of_month ?? now.getDate()) : null,
+                recurrence_day_of_week:
+                  recType === "weekly" ? (item.recurrence_day_of_week ?? now.getDay()) : null,
+                status: item.status ?? "TODO",
+              });
+            } else {
+              updateItem(item.id, {
+                is_recurring: false,
+                recurrence_type: null,
+                recurrence_day_of_month: null,
+                recurrence_day_of_week: null,
+              });
+            }
+          }}
+        >
+          <Repeat size={13} /> {item.is_recurring ? "Tarefa recorrente" : "Ativar recorrência"}
+        </button>
+      </div>
+
+      {item.is_recurring && (
+        <>
+          <label className="prop">
+            <span className="prop-label">Frequência</span>
+            <select
+              id="prop-recurrence-type"
+              className="select"
+              value={item.recurrence_type ?? "monthly"}
+              onChange={(e) => {
+                const nextType = e.target.value as RecurrenceType;
+                const now = new Date();
+                if (nextType === "monthly") {
+                  updateItem(item.id, {
+                    recurrence_type: "monthly",
+                    recurrence_day_of_month: item.recurrence_day_of_month ?? now.getDate(),
+                    recurrence_day_of_week: null,
+                  });
+                } else {
+                  updateItem(item.id, {
+                    recurrence_type: "weekly",
+                    recurrence_day_of_week: item.recurrence_day_of_week ?? now.getDay(),
+                    recurrence_day_of_month: null,
+                  });
+                }
+              }}
+            >
+              <option value="monthly">Mensal</option>
+              <option value="weekly">Semanal</option>
+            </select>
+          </label>
+
+          {(item.recurrence_type ?? "monthly") === "monthly" ? (
+            <label className="prop">
+              <span className="prop-label">Dia do mês</span>
+              <select
+                id="prop-recurrence-dom"
+                className="select"
+                value={item.recurrence_day_of_month ?? 1}
+                onChange={(e) =>
+                  updateItem(item.id, {
+                    recurrence_day_of_month: Number(e.target.value),
+                    last_recurred_at: null,
+                  })
+                }
+              >
+                {Array.from({ length: 31 }, (_, idx) => idx + 1).map((day) => (
+                  <option key={day} value={day}>
+                    Todo dia {day}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="prop">
+              <span className="prop-label">Dia da semana</span>
+              <select
+                id="prop-recurrence-dow"
+                className="select"
+                value={typeof item.recurrence_day_of_week === "number" ? item.recurrence_day_of_week : 1}
+                onChange={(e) =>
+                  updateItem(item.id, {
+                    recurrence_day_of_week: Number(e.target.value),
+                    last_recurred_at: null,
+                  })
+                }
+              >
+                {Object.entries(WEEKDAY_LABEL).map(([val, label]) => (
+                  <option key={val} value={Number(val)}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </>
+      )}
 
       {item.schedule.start_time && (
         <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>

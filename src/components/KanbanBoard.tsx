@@ -12,8 +12,8 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarClock, FileText, ListChecks, Paperclip, Link2, Plus, Sunrise } from "lucide-react";
-import { checklistProgress, useStore } from "@/lib/store";
+import { CalendarClock, FileText, ListChecks, Paperclip, Link2, Plus, Repeat, Sunrise } from "lucide-react";
+import { checklistProgress, formatRecurrenceSummary, useStore } from "@/lib/store";
 import { STATUS_LABEL } from "@/lib/types";
 import type { ItemNode, Status } from "@/lib/types";
 import { formatWhen, typeIcon } from "@/lib/format";
@@ -60,7 +60,17 @@ export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean 
     >
       <div className="card-top">
         <span className="card-icon">{typeIcon(item)}</span>
-        <span className="card-title">{item.title || "Sem título"}</span>
+        <span className="card-title">
+          {item.title || "Sem título"}
+          {item.is_recurring && (
+            <span
+              className="recurring-indicator"
+              title={formatRecurrenceSummary(item) ?? "Tarefa recorrente"}
+            >
+              <Repeat size={11} />
+            </span>
+          )}
+        </span>
         <button
           className="card-page-btn"
           title={item.type === "PAGE" ? "Abrir página" : "Criar subpágina vinculada ao projeto"}

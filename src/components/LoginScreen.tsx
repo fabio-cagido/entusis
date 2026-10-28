@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase/client";
 import { Lock, Mail, Sparkles, UserPlus, LogIn } from "lucide-react";
 
@@ -14,12 +14,21 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const sb = getSupabase()!;
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error") || params.get("error_description");
+    if (authError) {
+      setError(`Falha na autenticação com Google: ${authError}`);
+    }
+  }, []);
+
   const handleGoogle = async () => {
     setError(null);
     const { error } = await sb.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/today?gcal=connected`,
+        redirectTo: `${window.location.origin}/auth/callback`,
         scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
         queryParams: {
           access_type: "offline",
@@ -41,7 +50,7 @@ export default function LoginScreen() {
         const { data, error } = await sb.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin },
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
         });
         if (error) throw error;
         if (data.session) {
@@ -77,7 +86,7 @@ export default function LoginScreen() {
     try {
       const { error } = await sb.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: window.location.origin },
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
       });
       if (error) throw error;
       setInfo(`Enviamos um link mágico de acesso para ${email}. Clique nele para entrar.`);

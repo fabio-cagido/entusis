@@ -28,6 +28,8 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Circle,
   Diamond,
   Download,
@@ -75,6 +77,7 @@ type MindData = {
   collapsed: boolean;
   side: 1 | -1;
   isDragging?: boolean;
+  isDropTarget?: boolean;
 };
 type MindNode = Node<MindData, "mind">;
 
@@ -120,7 +123,7 @@ const MindCtx = createContext<Ctx | null>(null);
 
 const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<MindNode>) {
   const ctx = useContext(MindCtx)!;
-  const { item, color, isRoot, editing, childCount, collapsed, side, isDragging } = data;
+  const { item, color, isRoot, editing, childCount, collapsed, side, isDragging, isDropTarget } = data;
   const [draft, setDraft] = useState(item.title);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -193,7 +196,7 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
   return (
     <div
       ref={nodeRef}
-      className={`mind-node ${isRoot ? "is-root" : ""} ${selected ? "is-selected" : ""} ${item.status === "DONE" ? "is-done" : ""} ${isDragging ? "is-dragging" : ""}`}
+      className={`mind-node ${isRoot ? "is-root" : ""} ${selected ? "is-selected" : ""} ${item.status === "DONE" ? "is-done" : ""} ${isDragging ? "is-dragging" : ""} ${isDropTarget ? "is-drop-target" : ""}`}
       style={{ ["--node" as string]: color }}
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -379,7 +382,7 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
         </div>
       )}
 
-      {childCount > 0 && !isRoot && (
+      {childCount > 0 && (!isRoot || collapsed) && (
         <button
           className={`mind-collapse nodrag ${side === -1 ? "is-left" : ""}`}
           title={collapsed ? "Expandir" : "Recolher"}
@@ -714,9 +717,11 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const dimensionsRef = useRef<Map<string, NodeDimensions>>(new Map());
   const relayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ---- Drag to reorder state ---- */
+  /* ---- Drag to reorder & reparent state ---- */
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const dropTargetRef = useRef<string | null>(null);
   const dragRef = useRef<{
     nodeId: string;
     parentId: string | null;
@@ -724,6 +729,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
     fixedX: number;
     siblings: ItemNode[];
     initialIndex: number;
+    forbiddenIds: Set<string>;
     isProcessNode?: boolean;
   } | null>(null);
 
@@ -845,6 +851,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
   useEffect(() => {
     setNodes((prev) => {
       const sel = new Set(prev.filter((n) => n.selected).map((n) => n.id));
+      const prevPosMap = new Map(prev.map((n) => [n.id, n.position]));
       const rootX = root?.canvas?.x ?? 0;
 
       const treeNodes = visibleMind
@@ -852,9 +859,12 @@ function MindMapInner({ rootId }: { rootId: string }) {
         .map<MindNode>((it) => ({
           id: it.id,
           type: "mind",
-          position: { x: it.canvas!.x, y: it.canvas!.y },
+          position:
+            activeDragId === it.id && prevPosMap.has(it.id)
+              ? prevPosMap.get(it.id)!
+              : { x: it.canvas!.x, y: it.canvas!.y },
           selected: sel.has(it.id),
-          className: `react-flow__node-mind ${activeDragId === it.id ? "is-dragging" : ""}`,
+          className: `react-flow__node-mind ${activeDragId === it.id ? "is-dragging" : ""} ${dropTargetId === it.id ? "is-drop-target" : ""}`,
           data: {
             item: it,
             color: colorOf(it),
@@ -864,6 +874,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
             collapsed: collapsed.has(it.id),
             side: it.canvas!.x < rootX ? -1 : 1,
             isDragging: activeDragId === it.id,
+            isDropTarget: dropTargetId === it.id,
           },
         }));
 
@@ -872,7 +883,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
         .map<ProcessNode>((it) => ({
           id: it.id,
           type: "process",
-          position: { x: it.canvas!.x, y: it.canvas!.y },
+          position:
+            activeDragId === it.id && prevPosMap.has(it.id)
+              ? prevPosMap.get(it.id)!
+              : { x: it.canvas!.x, y: it.canvas!.y },
           selected: sel.has(it.id),
           data: {
             item: it,
@@ -886,7 +900,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       return [...treeNodes, ...flowNodes];
     });
-  }, [visibleMind, processScope, colorOf, rootId, editingId, childCounts, collapsed, root?.canvas?.x, activeDragId]);
+  }, [visibleMind, processScope, colorOf, rootId, editingId, childCounts, collapsed, root?.canvas?.x, activeDragId, dropTargetId]);
 
   /* ---- Edges (Curvas de Árvore + Conectores Direcionais de Processo) ---- */
   const edges = useMemo<Edge[]>(() => {
@@ -985,24 +999,19 @@ function MindMapInner({ rootId }: { rootId: string }) {
     return out;
   }, [visibleMind, processScope, items, rootId, colorOf]);
 
-  /* ---- Interactions: Trava X apenas em nós filhos do mapa; libera formas de processo ---- */
+  /* ---- Interactions: Movimento livre 2D durante o arraste para permitir reparenting e reordenação ---- */
   const onNodesChange = useCallback((changes: NodeChange<MindNode | ProcessNode>[]) => {
-    const currentDrag = dragRef.current;
-    if (currentDrag && !currentDrag.isProcessNode) {
-      for (const change of changes) {
-        if (change.type === "position" && change.id === currentDrag.nodeId && change.position) {
-          change.position.x = currentDrag.fixedX;
-        }
-      }
-    }
     setNodes((ns) => applyNodeChanges(changes, ns));
   }, []);
 
-  /* ---- Drag Start: Setup sibling list para mapa ou modo livre para processo ---- */
+  /* ---- Drag Start: Setup sibling list + trava de prevenção de ciclos (descendentes) ---- */
   const onNodeDragStart = useCallback(
     (_: unknown, node: MindNode | ProcessNode) => {
       const item = items[node.id];
       if (!item) return;
+
+      dropTargetRef.current = null;
+      setDropTargetId(null);
 
       // Forma de processo: posicionamento livre no canvas
       if (item.canvas?.shape) {
@@ -1013,6 +1022,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
           fixedX: node.position.x,
           siblings: [],
           initialIndex: 0,
+          forbiddenIds: new Set([node.id]),
           isProcessNode: true,
         };
         setActiveDragId(node.id);
@@ -1026,6 +1036,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
       }
 
       if (!item.parent_id) return;
+
+      // Trava anticiclo: o nó arrastado + toda sua árvore de descendentes diretos e indiretos
+      const descendantIds = descendantsOf(items, node.id).map((d) => d.id);
+      const forbiddenIds = new Set<string>([node.id, ...descendantIds]);
 
       const rootX = root?.canvas?.x ?? 0;
       const side: 1 | -1 = node.position.x < rootX ? -1 : 1;
@@ -1048,6 +1062,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         fixedX: node.position.x,
         siblings,
         initialIndex: initialIndex >= 0 ? initialIndex : 0,
+        forbiddenIds,
         isProcessNode: false,
       };
 
@@ -1056,14 +1071,83 @@ function MindMapInner({ rootId }: { rootId: string }) {
     [items, rootId, root?.canvas?.x],
   );
 
-  /* ---- Drag Move: Linha guia em irmãos do mapa mental ---- */
+  /* ---- Drag Move: Detecção de colisão para reparenting + linha guia em irmãos ---- */
   const onNodeDrag = useCallback(
     (_: unknown, node: MindNode | ProcessNode) => {
       const drag = dragRef.current;
       if (!drag || drag.isProcessNode || node.id === rootId) return;
 
+      const draggedItem = items[node.id];
+      const dragDim =
+        dimensionsRef.current.get(node.id) ||
+        estimateNodeSize(draggedItem || ({ title: "" } as ItemNode), false);
+      const dragRect = {
+        x: node.position.x,
+        y: node.position.y,
+        width: dragDim.width,
+        height: dragDim.height,
+        cx: node.position.x + dragDim.width / 2,
+        cy: node.position.y + dragDim.height / 2,
+      };
+
+      // 1. Verificar colisão/sobreposição com outros nós válidos do mapa (excluindo a si mesmo e seus descendentes)
+      let bestTargetId: string | null = null;
+      let bestOverlapArea = 0;
+
+      for (const cand of visibleMind) {
+        if (!cand.canvas) continue;
+        // Impedir ciclo (nó sobre si mesmo ou sobre qualquer descendente) e ignorar pai atual se apenas reordenando
+        if (drag.forbiddenIds.has(cand.id)) continue;
+        if (cand.id === drag.parentId && cand.id !== rootId) continue;
+        if (cand.id === rootId && drag.parentId === rootId) continue;
+
+        const candDim =
+          dimensionsRef.current.get(cand.id) ||
+          estimateNodeSize(cand, cand.id === rootId);
+        const candRect = {
+          x: cand.canvas.x,
+          y: cand.canvas.y,
+          width: candDim.width,
+          height: candDim.height,
+        };
+
+        const overlapX = Math.max(
+          0,
+          Math.min(dragRect.x + dragRect.width, candRect.x + candRect.width) -
+            Math.max(dragRect.x, candRect.x),
+        );
+        const overlapY = Math.max(
+          0,
+          Math.min(dragRect.y + dragRect.height, candRect.y + candRect.height) -
+            Math.max(dragRect.y, candRect.y),
+        );
+
+        if (overlapX > 14 && overlapY > 10) {
+          const area = overlapX * overlapY;
+          if (area > bestOverlapArea) {
+            bestOverlapArea = area;
+            bestTargetId = cand.id;
+          }
+        }
+      }
+
+      if (bestTargetId) {
+        if (dropTargetRef.current !== bestTargetId) {
+          dropTargetRef.current = bestTargetId;
+          setDropTargetId(bestTargetId);
+        }
+        setDropIndicator(null);
+        return;
+      }
+
+      if (dropTargetRef.current !== null) {
+        dropTargetRef.current = null;
+        setDropTargetId(null);
+      }
+
+      // 2. Caso não esteja sobreposto a um nó alvo, exibir guia de reordenação entre irmãos
       const others = drag.siblings.filter((s) => s.id !== node.id);
-      if (others.length === 0) {
+      if (others.length === 0 || Math.abs(node.position.x - drag.fixedX) > 140) {
         setDropIndicator(null);
         return;
       }
@@ -1110,15 +1194,18 @@ function MindMapInner({ rootId }: { rootId: string }) {
         targetIndex,
       });
     },
-    [rootId],
+    [rootId, items, visibleMind],
   );
 
-  /* ---- Drag Stop: Salva nova posição ---- */
+  /* ---- Drag Stop: Reparenting sobre nó alvo OU reordenação entre irmãos ---- */
   const onNodeDragStop = useCallback(
     (_: unknown, node: MindNode | ProcessNode) => {
       setActiveDragId(null);
       const indicator = dropIndicator;
       setDropIndicator(null);
+      const targetParentId = dropTargetRef.current;
+      dropTargetRef.current = null;
+      setDropTargetId(null);
       const drag = dragRef.current;
       dragRef.current = null;
 
@@ -1154,11 +1241,86 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       if (!drag || drag.isProcessNode) return;
 
-      const others = drag.siblings.filter((s) => s.id !== node.id);
-      const targetIdx = indicator ? indicator.targetIndex : drag.initialIndex;
-
       const draggedItem = items[node.id];
       if (!draggedItem) return;
+
+      // Caso 1: Reparenting — o nó foi solto sobre um nó de destino válido (não ele mesmo e não descendente)
+      if (
+        targetParentId &&
+        targetParentId !== node.id &&
+        !drag.forbiddenIds.has(targetParentId) &&
+        items[targetParentId]
+      ) {
+        const nextCollapsed = new Set(collapsed);
+        if (nextCollapsed.has(targetParentId)) {
+          nextCollapsed.delete(targetParentId);
+          setCollapsed(nextCollapsed);
+        }
+
+        const targetSiblings = Object.values(items).filter(
+          (i) => i.parent_id === targetParentId && i.id !== node.id && !i.canvas?.shape,
+        );
+        const maxOrder = targetSiblings.reduce((m, s) => Math.max(m, s.sort_order), -10);
+        const nextSortOrder = maxOrder + 10;
+
+        const rootX = root?.canvas?.x ?? 0;
+        const targetItem = items[targetParentId];
+        const targetSideX =
+          targetParentId === rootId
+            ? node.position.x >= rootX
+              ? rootX + 160
+              : rootX - 160
+            : targetItem?.canvas?.x ?? node.position.x;
+
+        const updatedItems: Record<string, ItemNode> = {
+          ...items,
+          [node.id]: {
+            ...draggedItem,
+            parent_id: targetParentId,
+            sort_order: nextSortOrder,
+            canvas: {
+              ...(draggedItem.canvas ?? { x: targetSideX, y: node.position.y }),
+              x: targetSideX,
+            },
+          },
+        };
+
+        const newPositions = layoutTree(updatedItems, rootId, nextCollapsed, dimensionsRef.current);
+        const patches: { id: string; patch: Partial<ItemNode> }[] = [];
+
+        // Patch principal do nó reparentado (atualiza parent_id, sort_order e posição calculada)
+        const reparentedPos = newPositions[node.id] ?? { x: targetSideX, y: node.position.y };
+        patches.push({
+          id: node.id,
+          patch: {
+            parent_id: targetParentId,
+            sort_order: nextSortOrder,
+            canvas: {
+              ...(draggedItem.canvas ?? {}),
+              ...reparentedPos,
+            },
+          },
+        });
+
+        // Atualizar posições de todos os demais nós do mapa (incluindo os descendentes do nó movido)
+        for (const [id, p] of Object.entries(newPositions)) {
+          if (id === node.id) continue;
+          const cur = items[id];
+          if (!cur || !cur.canvas || cur.canvas.x !== p.x || cur.canvas.y !== p.y) {
+            patches.push({
+              id,
+              patch: { canvas: { ...(cur?.canvas ?? {}), ...p } },
+            });
+          }
+        }
+
+        updateItems(patches);
+        return;
+      }
+
+      // Caso 2: Reordenação entre irmãos (ou retorno suave ao layout original se solto no vazio)
+      const others = drag.siblings.filter((s) => s.id !== node.id);
+      const targetIdx = indicator ? indicator.targetIndex : drag.initialIndex;
 
       const reordered = [
         ...others.slice(0, targetIdx),
@@ -1202,7 +1364,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         updateItems(patches);
       }
     },
-    [dropIndicator, rootId, root, items, collapsed, updateItems],
+    [dropIndicator, rootId, root, items, collapsed, updateItem, updateItems],
   );
 
   const onConnect = useCallback(
@@ -1451,13 +1613,40 @@ function MindMapInner({ rootId }: { rootId: string }) {
     }, 0);
   }, [selectedIds, rootId, childCounts, deleteItem, collapsed]);
 
+  const collapsibleParentIds = useMemo(() => {
+    const nonRootParents = mindScope
+      .filter((it) => it.id !== rootId && (childCounts[it.id] ?? 0) > 0)
+      .map((it) => it.id);
+    if (nonRootParents.length > 0) return nonRootParents;
+    if ((childCounts[rootId] ?? 0) > 0) return [rootId];
+    return [];
+  }, [mindScope, rootId, childCounts]);
+
+  const hasExpandedBranches = useMemo(
+    () => collapsibleParentIds.some((id) => !collapsed.has(id)),
+    [collapsibleParentIds, collapsed],
+  );
+
   const autoLayout = useCallback(() => {
-    const pos = layoutTree(mindScope, rootId, collapsed, dimensionsRef.current);
+    const nextCollapsed =
+      collapsibleParentIds.length > 0 && hasExpandedBranches
+        ? new Set<string>(collapsibleParentIds)
+        : new Set<string>();
+
+    setCollapsed(nextCollapsed);
+
+    const pos = layoutTree(mindScope, rootId, nextCollapsed, dimensionsRef.current);
     updateItems(
-      Object.entries(pos).map(([id, p]) => ({ id, patch: { canvas: { ...(items[id]?.canvas ?? {}), ...p } } })),
+      Object.entries(pos).map(([id, p]) => ({
+        id,
+        patch: { canvas: { ...(items[id]?.canvas ?? {}), ...p } },
+      })),
     );
-    setTimeout(() => rf.fitView({ duration: 400, padding: 0.2 }), 50);
-  }, [mindScope, rootId, collapsed, items, updateItems, rf]);
+
+    setTimeout(() => {
+      rf.fitView({ duration: 400, padding: 0.2 });
+    }, 80);
+  }, [collapsibleParentIds, hasExpandedBranches, mindScope, rootId, items, updateItems, rf]);
 
   const setColor = (c: string) =>
     updateItems(selectedIds.map((id) => ({ id, patch: { canvas: { ...(items[id]?.canvas ?? { x: 0, y: 0 }), color: c } } })));
@@ -1701,8 +1890,18 @@ function MindMapInner({ rootId }: { rootId: string }) {
               )}
             </div>
 
-            <button id="canvas-auto-layout" className="btn btn-ghost btn-xs" onClick={autoLayout} title="Auto-organizar mapa mental">
-              <Wand2 size={14} /> Organizar
+            <button
+              id="canvas-auto-layout"
+              className="btn btn-ghost btn-xs"
+              onClick={autoLayout}
+              title={
+                hasExpandedBranches
+                  ? "Recolher todos os nós e organizar"
+                  : "Expandir tudo, organizar e enquadrar"
+              }
+            >
+              {hasExpandedBranches ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}{" "}
+              Organizar
             </button>
             <button className="btn btn-ghost btn-xs" onClick={() => rf.fitView({ duration: 400, padding: 0.2 })} title="Enquadrar tudo">
               <Maximize size={14} />

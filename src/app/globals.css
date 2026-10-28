@@ -732,6 +732,17 @@ input, select, textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 0;
+}
+
+.tree-shared-icon {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  opacity: 0.85;
 }
 
 .tree-icon {
@@ -2293,6 +2304,19 @@ li[data-type="taskItem"] > div {
   outline: 3px solid var(--primary);
   outline-offset: 2px;
   box-shadow: var(--shadow-xl);
+}
+
+.mind-node.is-drop-target {
+  border-color: var(--primary) !important;
+  outline: 2.5px solid var(--primary) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px var(--primary-faint), 0 0 24px rgba(139, 123, 255, 0.55) !important;
+  transform: scale(1.04);
+  z-index: 60;
+}
+
+.react-flow__node-mind.is-drop-target {
+  z-index: 1000 !important;
 }
 
 .mind-handle {
@@ -3934,6 +3958,22 @@ li[data-type="taskItem"] > div {
 .spin {
   animation: spin 0.9s linear infinite;
 }
+
+.recurring-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  color: var(--primary, #8b7bff);
+  opacity: 0.78;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.recurring-indicator:hover {
+  opacity: 1;
+}
+
 
 
 

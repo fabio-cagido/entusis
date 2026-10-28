@@ -426,10 +426,11 @@ function TreeRow({
             <span className="tree-title">{item.title || "Sem título"}</span>
             {(isSharedWithMe || hasShares) && (
               <span
-                className="shared-badge"
+                className="tree-shared-icon"
                 title={isSharedWithMe ? "Compartilhado com você" : "Compartilhado"}
+                aria-label={isSharedWithMe ? "Compartilhado com você" : "Compartilhado"}
               >
-                Compartilhado
+                <Users size={13} />
               </span>
             )}
           </Link>

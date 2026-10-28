@@ -42,6 +42,26 @@ export interface Attachment {
 
 export type ProcessShape = "rectangle" | "diamond" | "circle";
 
+export type RecurrenceType = "monthly" | "weekly";
+
+export const WEEKDAY_LABEL: Record<number, string> = {
+  0: "Domingo",
+  1: "Segunda-feira",
+  2: "Terça-feira",
+  3: "Quarta-feira",
+  4: "Quinta-feira",
+  5: "Sexta-feira",
+  6: "Sábado",
+};
+
+export interface RecurrenceMeta {
+  is_recurring?: boolean;
+  recurrence_type?: RecurrenceType | null;
+  recurrence_day_of_month?: number | null;
+  recurrence_day_of_week?: number | null;
+  last_recurred_at?: string | null;
+}
+
 export interface CanvasMeta {
   x: number;
   y: number;
@@ -49,6 +69,7 @@ export interface CanvasMeta {
   shape?: ProcessShape | null;
   width?: number | null;
   height?: number | null;
+  recurrence?: RecurrenceMeta | null;
 }
 
 export interface ItemNode {
@@ -65,6 +86,12 @@ export interface ItemNode {
   status: Status | null;
   /** Pinned to the "To Do Today" dashboard. */
   is_today: boolean;
+  /** Recurrence configuration for automatic reactivation on scheduled cycle. */
+  is_recurring?: boolean;
+  recurrence_type?: RecurrenceType | null;
+  recurrence_day_of_month?: number | null;
+  recurrence_day_of_week?: number | null;
+  last_recurred_at?: string | null;
   schedule: Schedule;
   attachments: Attachment[];
   /** UUIDs of other linked ItemNodes. */
