@@ -159,6 +159,8 @@ export const useStore = create<State>((set, get) => {
     schedule();
   };
 
+  let initPromise: Promise<void> | null = null;
+
   return {
     ready: false,
     repo: null,
@@ -172,100 +174,171 @@ export const useStore = create<State>((set, get) => {
     sidebarCollapsed: false,
 
     async init(repo) {
-      const r = repo ?? new LocalRepository();
-      let snap = await r.loadAll();
-
-      if (snap.items.length === 0 && snap.projects.length === 0) {
-        snap = buildSeed();
-        await r.upsertProjects(snap.projects);
-        await r.upsertItems(snap.items);
-      }
-      const theme = (typeof window !== "undefined" && (localStorage.getItem("nf-theme") as Theme)) || "system";
-      const sidebarCollapsed =
-        typeof window !== "undefined" && localStorage.getItem("entusis_sidebar_collapsed") === "true";
-      let favs: string[] = [];
-      try {
-        const rawFavs = typeof window !== "undefined" ? localStorage.getItem("nf-favorites") : null;
-        if (rawFavs) favs = JSON.parse(rawFavs);
-      } catch {
-        favs = [];
+      if (initPromise) {
+        return initPromise;
       }
 
-      let archivedSet: Set<string> | null = null;
-      try {
-        const rawArchived = typeof window !== "undefined" ? localStorage.getItem("nf-archived-projects") : null;
-        if (rawArchived) archivedSet = new Set(JSON.parse(rawArchived));
-      } catch {
-        archivedSet = null;
-      }
+      initPromise = (async () => {
+        try {
+          const r = repo ?? new LocalRepository();
+          let snap = await r.loadAll();
 
-      // Limpar localStorage legado para não re-duplicar quando usando Supabase
-      if (typeof window !== "undefined" && r.kind === "supabase") {
-        window.localStorage.removeItem("nodes-flows:v1");
-      }
-
-      // Garante que todo projeto tem uma página raiz vinculada e normaliza is_archived
-      const itemsMap = Object.fromEntries(snap.items.map((i) => [i.id, i]));
-      const projectsMap = Object.fromEntries(
-        snap.projects.map((p) => [
-          p.id,
-          {
-            ...p,
-            is_archived: archivedSet !== null ? archivedSet.has(p.id) : Boolean(p.is_archived),
-          },
-        ])
-      );
-      const touchedItems: string[] = [];
-      const touchedProjects: string[] = [];
-
-      for (const pr of Object.values(projectsMap)) {
-        if (!pr.page_id || !itemsMap[pr.page_id]) {
-          const match = Object.values(itemsMap).find(
-            (it) => it.type === "PAGE" && (it.project_id === pr.id || it.title.toLowerCase().trim() === pr.name.toLowerCase().trim())
-          );
-          if (match) {
-            pr.page_id = match.id;
-            match.project_id = pr.id;
-            if (match.title !== pr.name && (match.title.toLowerCase() === "novo projeto" || match.title.toLowerCase() === "sem título")) {
-              match.title = pr.name;
-              if (match.content && match.content.includes("<h2>Novo projeto — Visão Geral</h2>")) {
-                match.content = match.content.replace("<h2>Novo projeto — Visão Geral</h2>", `<h2>${pr.name} — Visão Geral</h2>`);
-              }
-            }
-            touchedItems.push(match.id);
-            touchedProjects.push(pr.id);
-          } else {
-            const page = newItem({
-              title: pr.name,
-              type: "PAGE",
-              icon: pr.icon || "📁",
-              project_id: pr.id,
-              parent_id: null,
-              content: `<h2>${pr.name} — Visão Geral</h2><p>Página central do projeto. Aqui você encontra objetivos estratégicos, notas, arquivos e o quadro de tarefas.</p>`,
-            });
-            itemsMap[page.id] = page;
-            pr.page_id = page.id;
-            touchedItems.push(page.id);
-            touchedProjects.push(pr.id);
+          if (snap.items.length === 0 && snap.projects.length === 0) {
+            snap = buildSeed();
+            await r.upsertProjects(snap.projects);
+            await r.upsertItems(snap.items);
           }
+          const theme = (typeof window !== "undefined" && (localStorage.getItem("nf-theme") as Theme)) || "system";
+          const sidebarCollapsed =
+            typeof window !== "undefined" && localStorage.getItem("entusis_sidebar_collapsed") === "true";
+          let favs: string[] = [];
+          try {
+            const rawFavs = typeof window !== "undefined" ? localStorage.getItem("nf-favorites") : null;
+            if (rawFavs) favs = JSON.parse(rawFavs);
+          } catch {
+            favs = [];
+          }
+
+          let archivedSet: Set<string> | null = null;
+          try {
+            const rawArchived = typeof window !== "undefined" ? localStorage.getItem("nf-archived-projects") : null;
+            if (rawArchived) archivedSet = new Set(JSON.parse(rawArchived));
+          } catch {
+            archivedSet = null;
+          }
+
+          // Limpar localStorage legado para não re-duplicar quando usando Supabase
+          if (typeof window !== "undefined" && r.kind === "supabase") {
+            window.localStorage.removeItem("nodes-flows:v1");
+          }
+
+          // Garante que todo projeto tem uma única página raiz vinculada (idempotente) e limpa duplicatas geradas anteriormente
+          const itemsMap = Object.fromEntries(snap.items.map((i) => [i.id, i]));
+          const projectsMap = Object.fromEntries(
+            snap.projects.map((p) => [
+              p.id,
+              {
+                ...p,
+                is_archived: archivedSet !== null ? archivedSet.has(p.id) : Boolean(p.is_archived),
+              },
+            ])
+          );
+          const touchedItems: string[] = [];
+          const duplicateProjectPageIdsToDelete: string[] = [];
+
+          const parentIdsWithChildren = new Set<string>();
+          for (const it of Object.values(itemsMap)) {
+            if (it.parent_id) {
+              parentIdsWithChildren.add(it.parent_id);
+            }
+          }
+
+          const isAutoGeneratedProjectPage = (it: ItemNode) => {
+            if (parentIdsWithChildren.has(it.id)) return false;
+            if (Array.isArray(it.attachments) && it.attachments.length > 0) return false;
+            if (Array.isArray(it.links) && it.links.length > 0) return false;
+            const c = (it.content || "").trim();
+            return (
+              c === "" ||
+              c.includes("— Visão Geral</h2><p>Página central do projeto.")
+            );
+          };
+
+          for (const pr of Object.values(projectsMap)) {
+            const prNameNorm = pr.name.toLowerCase().trim();
+            const candidates = Object.values(itemsMap).filter(
+              (it) =>
+                it.type === "PAGE" &&
+                !it.parent_id &&
+                it.default_view !== "CANVAS" &&
+                (it.project_id === pr.id ||
+                  (!it.project_id && it.title.toLowerCase().trim() === prNameNorm))
+            );
+
+            if (candidates.length > 0) {
+              candidates.sort((a, b) => {
+                const aAuto = isAutoGeneratedProjectPage(a);
+                const bAuto = isAutoGeneratedProjectPage(b);
+                if (aAuto !== bAuto) return aAuto ? 1 : -1;
+                return (a.created_at || "").localeCompare(b.created_at || "");
+              });
+
+              const canonical = candidates[0];
+              pr.page_id = canonical.id;
+
+              let mutated = false;
+              if (canonical.project_id !== pr.id) {
+                canonical.project_id = pr.id;
+                mutated = true;
+              }
+              if (
+                canonical.title !== pr.name &&
+                (canonical.title.toLowerCase() === "novo projeto" ||
+                  canonical.title.toLowerCase() === "sem título")
+              ) {
+                canonical.title = pr.name;
+                if (canonical.content && canonical.content.includes("<h2>Novo projeto — Visão Geral</h2>")) {
+                  canonical.content = canonical.content.replace(
+                    "<h2>Novo projeto — Visão Geral</h2>",
+                    `<h2>${pr.name} — Visão Geral</h2>`
+                  );
+                }
+                mutated = true;
+              }
+              if (mutated) {
+                touchedItems.push(canonical.id);
+              }
+
+              for (let i = 1; i < candidates.length; i++) {
+                const dup = candidates[i];
+                if (isAutoGeneratedProjectPage(dup)) {
+                  delete itemsMap[dup.id];
+                  duplicateProjectPageIdsToDelete.push(dup.id);
+                }
+              }
+            } else if (!pr.page_id || !itemsMap[pr.page_id]) {
+              const page = newItem({
+                title: pr.name,
+                type: "PAGE",
+                icon: pr.icon || "📁",
+                project_id: pr.id,
+                parent_id: null,
+                content: `<h2>${pr.name} — Visão Geral</h2><p>Página central do projeto. Aqui você encontra objetivos estratégicos, notas, arquivos e o quadro de tarefas.</p>`,
+              });
+              itemsMap[page.id] = page;
+              pr.page_id = page.id;
+              touchedItems.push(page.id);
+            }
+          }
+
+          if (duplicateProjectPageIdsToDelete.length > 0) {
+            console.info(
+              `[êntusis] Removendo ${duplicateProjectPageIdsToDelete.length} páginas raízes de projetos duplicadas...`
+            );
+            try {
+              await r.deleteItems(duplicateProjectPageIdsToDelete);
+            } catch (cleanupErr) {
+              console.error("[êntusis] Erro ao limpar páginas duplicadas:", cleanupErr);
+            }
+          }
+
+          set({
+            repo: r,
+            ready: true,
+            theme,
+            sidebarCollapsed,
+            favorites: favs,
+            items: itemsMap,
+            projects: projectsMap,
+          });
+
+          if (touchedItems.length > 0) touchItems(touchedItems);
+        } finally {
+          initPromise = null;
         }
-      }
+      })();
 
-      set({
-        repo: r,
-        ready: true,
-        theme,
-        sidebarCollapsed,
-        favorites: favs,
-        items: itemsMap,
-        projects: projectsMap,
-      });
-
-      if (touchedItems.length > 0) touchItems(touchedItems);
-      if (touchedProjects.length > 0) {
-        touchedProjects.forEach((id) => pendingProjects.add(id));
-        schedule();
-      }
+      return initPromise;
     },
 
     createItem(p) {

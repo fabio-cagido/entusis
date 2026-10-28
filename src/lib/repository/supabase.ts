@@ -83,33 +83,65 @@ const fromRow = (r: ItemRow): ItemNode => ({
 
 export class SupabaseRepository implements Repository {
   readonly kind = "supabase" as const;
+  private static readonly PAGE_SIZE = 1000;
+  private static readonly CHUNK_SIZE = 200;
+
   constructor(private client: SupabaseClient, private userId: string) {}
 
+  private async fetchAllRows<T>(table: string): Promise<T[]> {
+    const allRows: T[] = [];
+    let from = 0;
+
+    while (true) {
+      const to = from + SupabaseRepository.PAGE_SIZE - 1;
+      const { data, error } = await this.client
+        .from(table)
+        .select("*")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to);
+
+      if (error) throw error;
+      const batch = (data as T[]) ?? [];
+      allRows.push(...batch);
+
+      if (batch.length < SupabaseRepository.PAGE_SIZE) {
+        break;
+      }
+      from += SupabaseRepository.PAGE_SIZE;
+    }
+
+    return allRows;
+  }
+
   async loadAll(): Promise<Snapshot> {
-    const [items, projects] = await Promise.all([
-      this.client.from("item_nodes").select("*"),
-      this.client.from("projects").select("*"),
+    const [itemRows, projectRows] = await Promise.all([
+      this.fetchAllRows<ItemRow>("item_nodes"),
+      this.fetchAllRows<Project>("projects"),
     ]);
-    if (items.error) throw items.error;
-    if (projects.error) throw projects.error;
     return {
-      items: (items.data as ItemRow[]).map(fromRow),
-      projects: (projects.data as Project[]) ?? [],
+      items: itemRows.map(fromRow),
+      projects: projectRows,
     };
   }
 
   async upsertItems(items: ItemNode[]) {
     if (!items.length) return;
-    const { error } = await this.client
-      .from("item_nodes")
-      .upsert(items.map((i) => toRow(i, this.userId)));
-    if (error) throw error;
+    const rows = items.map((i) => toRow(i, this.userId));
+    for (let i = 0; i < rows.length; i += SupabaseRepository.CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + SupabaseRepository.CHUNK_SIZE);
+      const { error } = await this.client.from("item_nodes").upsert(chunk);
+      if (error) throw error;
+    }
   }
 
   async deleteItems(ids: string[]) {
     if (!ids.length) return;
-    const { error } = await this.client.from("item_nodes").delete().in("id", ids);
-    if (error) throw error;
+    for (let i = 0; i < ids.length; i += SupabaseRepository.CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + SupabaseRepository.CHUNK_SIZE);
+      const { error } = await this.client.from("item_nodes").delete().in("id", chunk);
+      if (error) throw error;
+    }
   }
 
   async upsertProjects(projects: Project[]) {
