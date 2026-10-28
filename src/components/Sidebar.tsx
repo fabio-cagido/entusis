@@ -543,7 +543,10 @@ function ProjectList({
   return (
     <section className="side-section">
       <header className="side-heading">
-        <span>Projetos</span>
+        <span className="side-heading-label">
+          <span>Projetos</span>
+          <span className="count-pill">{activeProjects.length}</span>
+        </span>
         <button
           id="add-project"
           className="icon-btn"
@@ -797,10 +800,24 @@ export default function Sidebar() {
     [items]
   );
 
+  const mindMapsCount = useMemo(
+    () =>
+      Object.values(items).filter(
+        (i) => i.type === "PAGE" && i.default_view === "CANVAS" && i.parent_id === null
+      ).length,
+    [items]
+  );
+
   const nav = [
     { href: "/today", label: "Hoje", icon: <Sunrise size={16} />, id: "nav-today" },
     { href: "/board", label: "Kanban", icon: <KanbanSquare size={16} />, id: "nav-board" },
-    { href: "/canvas", label: "Mapas mentais", icon: <Network size={16} />, id: "nav-canvas" },
+    {
+      href: "/canvas",
+      label: "Mapas mentais",
+      icon: <Network size={16} />,
+      id: "nav-canvas",
+      count: mindMapsCount,
+    },
     { href: "/calendar", label: "Agenda", icon: <CalendarDays size={16} />, id: "nav-calendar" },
   ];
 
@@ -882,7 +899,10 @@ export default function Sidebar() {
             className={`side-nav-item ${pathname === n.href ? "is-active" : ""}`}
           >
             {n.icon}
-            <span>{n.label}</span>
+            <span className="side-nav-label">{n.label}</span>
+            {typeof n.count === "number" && (
+              <span className="count-pill">{n.count}</span>
+            )}
           </Link>
         ))}
       </nav>
@@ -921,7 +941,10 @@ export default function Sidebar() {
               if (id) moveItem(id, null);
             }}
           >
-            <span>Páginas</span>
+            <span className="side-heading-label">
+              <span>Páginas</span>
+              <span className="count-pill">{roots.length}</span>
+            </span>
             <span className="side-heading-actions">
               <button
                 id="add-mindmap"

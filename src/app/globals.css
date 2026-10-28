@@ -635,6 +635,10 @@ input, select, textarea {
   font-weight: 600;
 }
 
+.side-nav-label {
+  flex: 1;
+}
+
 .side-scroll {
   flex: 1;
   overflow-y: auto;
@@ -659,6 +663,18 @@ input, select, textarea {
   letter-spacing: 0.05em;
   color: var(--text-faint);
   border-radius: var(--radius-sm);
+}
+
+.side-heading-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.side-heading .count-pill {
+  letter-spacing: normal;
+  text-transform: none;
+  font-weight: 500;
 }
 
 .side-heading.is-drop {
