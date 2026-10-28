@@ -127,7 +127,8 @@ export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapMod
   };
 
   const handleConfirmImport = async () => {
-    if (!parsedMap) return;
+    if (!parsedMap || isImporting) return;
+    setError(null);
     setIsImporting(true);
 
     try {
@@ -142,8 +143,8 @@ export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapMod
         return { ...node, project_id };
       });
 
-      // Insert all nodes into the global store & repository
-      addItems(nodesToInsert);
+      // Insert all nodes into the global store & wait for repository persistence
+      await addItems(nodesToInsert);
 
       // Close modal and navigate directly to canvas view
       onClose();
@@ -568,7 +569,7 @@ export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapMod
             }}
           >
             {isImporting ? (
-              "Importando mapa..."
+              "Salvando mapa no banco..."
             ) : (
               <>
                 Importar e Abrir Mapa <ArrowRight size={15} />

@@ -18,10 +18,14 @@ interface State {
   drawerId: string | null;
   theme: Theme;
   sync: SyncState;
+  syncError: string | null;
+  sidebarCollapsed: boolean;
 
   init(repo?: Repository): Promise<void>;
   createItem(p: Partial<ItemNode>): ItemNode;
-  addItems(newItems: ItemNode[]): void;
+  addItems(newItems: ItemNode[]): Promise<void>;
+  flushNow(): Promise<void>;
+  clearSyncError(): void;
   updateItem(id: string, patch: Partial<ItemNode>): void;
   updateItems(patches: { id: string; patch: Partial<ItemNode> }[]): void;
   deleteItem(id: string): void;
@@ -37,6 +41,8 @@ interface State {
   toggleFavorite(id: string): void;
   openDrawer(id: string | null): void;
   setTheme(t: Theme): void;
+  toggleSidebar(): void;
+  setSidebarCollapsed(collapsed: boolean): void;
   applyRemote(c: RemoteChange): void;
 }
 
@@ -46,25 +52,48 @@ const pendingItemDeletes = new Set<string>();
 const pendingProjects = new Set<string>();
 const pendingProjectDeletes = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useStore = create<State>((set, get) => {
   const schedule = () => {
     if (flushTimer) clearTimeout(flushTimer);
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     set({ sync: "saving" });
-    flushTimer = setTimeout(flush, 450);
+    flushTimer = setTimeout(() => {
+      void flush(false);
+    }, 450);
   };
 
-  const flush = async () => {
+  const flush = async (throwOnError = false) => {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     const { repo, items, projects } = get();
     if (!repo) return;
-    const up = [...pendingItems].map((id) => items[id]).filter(Boolean);
+
+    const itemIds = [...pendingItems];
     const del = [...pendingItemDeletes];
-    const pUp = [...pendingProjects].map((id) => projects[id]).filter(Boolean);
+    const projIds = [...pendingProjects];
     const pDel = [...pendingProjectDeletes];
-    pendingItems.clear();
-    pendingItemDeletes.clear();
-    pendingProjects.clear();
-    pendingProjectDeletes.clear();
+
+    if (itemIds.length === 0 && del.length === 0 && projIds.length === 0 && pDel.length === 0) {
+      set({ sync: "idle", syncError: null });
+      return;
+    }
+
+    const up = itemIds.map((id) => items[id]).filter(Boolean);
+    const pUp = projIds.map((id) => projects[id]).filter(Boolean);
+
+    set({ sync: "saving" });
+
     try {
       // Parents must exist before children (FK) — sort by depth.
       const depth = (n: ItemNode) => {
@@ -77,14 +106,51 @@ export const useStore = create<State>((set, get) => {
         return d;
       };
       up.sort((a, b) => depth(a) - depth(b));
-      await repo.upsertProjects(pUp);
-      await repo.upsertItems(up);
-      await repo.deleteItems(del);
-      await repo.deleteProjects(pDel);
-      set({ sync: "idle" });
-    } catch (e) {
+
+      if (pUp.length > 0) {
+        await repo.upsertProjects(pUp);
+        projIds.forEach((id) => pendingProjects.delete(id));
+      } else {
+        projIds.forEach((id) => pendingProjects.delete(id));
+      }
+
+      if (up.length > 0) {
+        await repo.upsertItems(up);
+        itemIds.forEach((id) => pendingItems.delete(id));
+      } else {
+        itemIds.forEach((id) => pendingItems.delete(id));
+      }
+
+      if (del.length > 0) {
+        await repo.deleteItems(del);
+        del.forEach((id) => pendingItemDeletes.delete(id));
+      }
+
+      if (pDel.length > 0) {
+        await repo.deleteProjects(pDel);
+        pDel.forEach((id) => pendingProjectDeletes.delete(id));
+      }
+
+      set({ sync: "idle", syncError: null });
+    } catch (e: unknown) {
+      const errMsg =
+        e instanceof Error
+          ? e.message
+          : typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : String(e);
       console.error("[êntusis] sync failed", e);
-      set({ sync: "error" });
+      set({
+        sync: "error",
+        syncError: `Falha ao sincronizar com o banco: ${errMsg}`,
+      });
+      // Agendar nova tentativa automática mantendo os itens na fila pendingItems
+      retryTimer = setTimeout(() => {
+        void flush(false);
+      }, 5000);
+      if (throwOnError) {
+        throw new Error(errMsg);
+      }
     }
   };
 
@@ -101,7 +167,9 @@ export const useStore = create<State>((set, get) => {
     drawerId: null,
     theme: "system",
     sync: "idle",
+    syncError: null,
     favorites: [],
+    sidebarCollapsed: false,
 
     async init(repo) {
       const r = repo ?? new LocalRepository();
@@ -113,6 +181,8 @@ export const useStore = create<State>((set, get) => {
         await r.upsertItems(snap.items);
       }
       const theme = (typeof window !== "undefined" && (localStorage.getItem("nf-theme") as Theme)) || "system";
+      const sidebarCollapsed =
+        typeof window !== "undefined" && localStorage.getItem("entusis_sidebar_collapsed") === "true";
       let favs: string[] = [];
       try {
         const rawFavs = typeof window !== "undefined" ? localStorage.getItem("nf-favorites") : null;
@@ -121,98 +191,32 @@ export const useStore = create<State>((set, get) => {
         favs = [];
       }
 
-      // Limpar localStorage legado para não re-duplicar
-      if (typeof window !== "undefined") {
+      let archivedSet: Set<string> | null = null;
+      try {
+        const rawArchived = typeof window !== "undefined" ? localStorage.getItem("nf-archived-projects") : null;
+        if (rawArchived) archivedSet = new Set(JSON.parse(rawArchived));
+      } catch {
+        archivedSet = null;
+      }
+
+      // Limpar localStorage legado para não re-duplicar quando usando Supabase
+      if (typeof window !== "undefined" && r.kind === "supabase") {
         window.localStorage.removeItem("nodes-flows:v1");
       }
 
-      // Garante que todo projeto tem uma página raiz vinculada
+      // Garante que todo projeto tem uma página raiz vinculada e normaliza is_archived
       const itemsMap = Object.fromEntries(snap.items.map((i) => [i.id, i]));
-      const projectsMap = Object.fromEntries(snap.projects.map((p) => [p.id, p]));
+      const projectsMap = Object.fromEntries(
+        snap.projects.map((p) => [
+          p.id,
+          {
+            ...p,
+            is_archived: archivedSet !== null ? archivedSet.has(p.id) : Boolean(p.is_archived),
+          },
+        ])
+      );
       const touchedItems: string[] = [];
       const touchedProjects: string[] = [];
-
-      // --- DEDUPLICAÇÃO DE PROJETOS DUPLICADOS ---
-      const projectsByName = new Map<string, Project[]>();
-      for (const pr of Object.values(projectsMap)) {
-        const key = pr.name.toLowerCase().trim();
-        const list = projectsByName.get(key) || [];
-        list.push(pr);
-        projectsByName.set(key, list);
-      }
-
-      const projectsToDelete: string[] = [];
-      for (const [, list] of projectsByName.entries()) {
-        if (list.length > 1) {
-          const countItems = (pid: string) => Object.values(itemsMap).filter((it) => it.project_id === pid).length;
-          list.sort((a, b) => countItems(b.id) - countItems(a.id));
-          const primary = list[0];
-          const duplicates = list.slice(1);
-
-          for (const dup of duplicates) {
-            projectsToDelete.push(dup.id);
-            delete projectsMap[dup.id];
-
-            for (const it of Object.values(itemsMap)) {
-              if (it.project_id === dup.id) {
-                it.project_id = primary.id;
-                touchedItems.push(it.id);
-              }
-            }
-          }
-        }
-      }
-
-      // --- DEDUPLICAÇÃO DE PÁGINAS/ITENS DUPLICADOS ---
-      const itemsByKey = new Map<string, ItemNode[]>();
-      for (const it of Object.values(itemsMap)) {
-        const normTitle = it.title.toLowerCase().trim();
-        const key = `${normTitle}__${it.parent_id || "root"}__${it.type}`;
-        const list = itemsByKey.get(key) || [];
-        list.push(it);
-        itemsByKey.set(key, list);
-      }
-
-      const itemsToDelete: string[] = [];
-      for (const [, list] of itemsByKey.entries()) {
-        if (list.length > 1) {
-          const score = (it: ItemNode) => {
-            const childCount = Object.values(itemsMap).filter((c) => c.parent_id === it.id).length;
-            return childCount * 1000 + (it.content?.length || 0);
-          };
-          list.sort((a, b) => score(b) - score(a));
-          const primary = list[0];
-          const duplicates = list.slice(1);
-
-          for (const dup of duplicates) {
-            itemsToDelete.push(dup.id);
-            delete itemsMap[dup.id];
-
-            for (const child of Object.values(itemsMap)) {
-              if (child.parent_id === dup.id) {
-                child.parent_id = primary.id;
-                touchedItems.push(child.id);
-              }
-            }
-          }
-        }
-      }
-
-      // Deletar duplicados permanentemente do repositório
-      if (projectsToDelete.length > 0) {
-        try {
-          await r.deleteProjects(projectsToDelete);
-        } catch (e) {
-          console.warn("[êntusis] falha ao deletar projetos duplicados:", e);
-        }
-      }
-      if (itemsToDelete.length > 0) {
-        try {
-          await r.deleteItems(itemsToDelete);
-        } catch (e) {
-          console.warn("[êntusis] falha ao deletar itens duplicados:", e);
-        }
-      }
 
       for (const pr of Object.values(projectsMap)) {
         if (!pr.page_id || !itemsMap[pr.page_id]) {
@@ -251,6 +255,7 @@ export const useStore = create<State>((set, get) => {
         repo: r,
         ready: true,
         theme,
+        sidebarCollapsed,
         favorites: favs,
         items: itemsMap,
         projects: projectsMap,
@@ -272,14 +277,23 @@ export const useStore = create<State>((set, get) => {
       return it;
     },
 
-    addItems(newItems) {
+    async addItems(newItems) {
       if (!newItems || newItems.length === 0) return;
       const next = { ...get().items };
       for (const it of newItems) {
         next[it.id] = it;
+        pendingItems.add(it.id);
       }
       set({ items: next });
-      touchItems(newItems.map((i) => i.id));
+      await flush(true);
+    },
+
+    async flushNow() {
+      await flush(false);
+    },
+
+    clearSyncError() {
+      set({ syncError: null });
     },
 
     updateItem(id, patch) {
@@ -403,9 +417,19 @@ export const useStore = create<State>((set, get) => {
         sort_order: n,
         created_at: new Date().toISOString(),
         page_id: page.id,
+        is_archived: false,
         ...p,
       };
-      set((s) => ({ projects: { ...s.projects, [pr.id]: pr } }));
+      set((s) => {
+        const nextProjects = { ...s.projects, [pr.id]: pr };
+        if (typeof window !== "undefined") {
+          const archivedIds = Object.values(nextProjects)
+            .filter((proj) => proj.is_archived)
+            .map((proj) => proj.id);
+          localStorage.setItem("nf-archived-projects", JSON.stringify(archivedIds));
+        }
+        return { projects: nextProjects };
+      });
       pendingProjects.add(pr.id);
       schedule();
       return pr;
@@ -414,7 +438,16 @@ export const useStore = create<State>((set, get) => {
     updateProject(id, patch) {
       const cur = get().projects[id];
       if (!cur) return;
-      set((s) => ({ projects: { ...s.projects, [id]: { ...s.projects[id], ...patch } } }));
+      set((s) => {
+        const nextProjects = { ...s.projects, [id]: { ...s.projects[id], ...patch } };
+        if (typeof window !== "undefined" && patch.is_archived !== undefined) {
+          const archivedIds = Object.values(nextProjects)
+            .filter((proj) => proj.is_archived)
+            .map((proj) => proj.id);
+          localStorage.setItem("nf-archived-projects", JSON.stringify(archivedIds));
+        }
+        return { projects: nextProjects };
+      });
       if (patch.name) {
         const { items } = get();
         const page =
@@ -447,6 +480,10 @@ export const useStore = create<State>((set, get) => {
       });
       if (typeof window !== "undefined") {
         localStorage.setItem("nf-favorites", JSON.stringify(nextFavs));
+        const archivedIds = Object.values(next)
+          .filter((proj) => proj.is_archived)
+          .map((proj) => proj.id);
+        localStorage.setItem("nf-archived-projects", JSON.stringify(archivedIds));
       }
       // Remove todos os itens vinculados ao projeto ao movê-lo para a lixeira
       const affected = Object.values(items).filter((i) => i.project_id === id);
@@ -500,6 +537,21 @@ export const useStore = create<State>((set, get) => {
       set({ theme: t });
     },
 
+    toggleSidebar() {
+      const next = !get().sidebarCollapsed;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("entusis_sidebar_collapsed", String(next));
+      }
+      set({ sidebarCollapsed: next });
+    },
+
+    setSidebarCollapsed(collapsed) {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("entusis_sidebar_collapsed", String(collapsed));
+      }
+      set({ sidebarCollapsed: collapsed });
+    },
+
     applyRemote(c) {
       // Ignore echoes of records we are about to write ourselves.
       if (c.table === "items") {
@@ -532,6 +584,7 @@ export const useStore = create<State>((set, get) => {
                   ...existing,
                   ...r,
                   page_id: existing?.page_id ?? r.page_id,
+                  is_archived: typeof r.is_archived === "boolean" ? r.is_archived : existing?.is_archived ?? false,
                 },
               },
             };

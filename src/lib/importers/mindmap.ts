@@ -547,10 +547,17 @@ function parseEntusisExport(doc: any): ParsedMindMap {
     return {
       ...it,
       id: newId,
+      title: typeof it.title === "string" ? it.title : "Sem título",
+      content: typeof it.content === "string" ? it.content : "",
+      icon: it.icon ?? (isRoot ? "🧠" : null),
+      type: it.type || (isRoot ? "PAGE" : "MINDMAP_NODE"),
+      status: it.status ?? null,
+      is_today: Boolean(it.is_today),
       // Se for a raiz do mapa: parent_id = null
       // Se for nó de processo ou filho sem pai mapeado: associa à raiz do mapa para garantir exibição no canvas
       parent_id: isRoot ? null : remappedParent || rootId,
-      default_view: isRoot ? ("CANVAS" as const) : it.default_view,
+      default_view: isRoot ? ("CANVAS" as const) : it.default_view || ("PAGE" as const),
+      sort_order: typeof it.sort_order === "number" ? it.sort_order : 0,
       // Links remapeados garantindo todas as conexões de setas de processos
       links: Array.from(linksMap.get(it.id) || []),
       attachments: it.attachments ?? [],

@@ -292,13 +292,19 @@ export default function TodayView() {
   const todays = useMemo(
     () =>
       Object.values(items).filter(
-        (i) => i.status && i.status !== "BACKLOG" && (i.is_today || i.status === "DOING" || isToday(i.schedule.start_time)),
+        (i) =>
+          i.status &&
+          i.status !== "BACKLOG" &&
+          (i.is_today || i.status === "DOING" || isToday(i.schedule.start_time)) &&
+          (!i.project_id || !projects[i.project_id]?.is_archived),
       ),
-    [items],
+    [items, projects],
   );
 
   const projectList = useMemo(() => {
-    return Object.values(projects).sort((a, b) => a.sort_order - b.sort_order);
+    return Object.values(projects)
+      .filter((p) => !p.is_archived)
+      .sort((a, b) => a.sort_order - b.sort_order);
   }, [projects]);
 
   const itemsByProject = useMemo(() => {

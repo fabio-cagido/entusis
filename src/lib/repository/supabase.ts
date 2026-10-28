@@ -26,28 +26,36 @@ interface ItemRow {
   updated_at: string;
 }
 
-const toRow = (n: ItemNode, userId: string): ItemRow => ({
-  id: n.id,
-  user_id: userId,
-  title: n.title,
-  content: n.content,
-  icon: n.icon,
-  type: n.type,
-  parent_id: n.parent_id,
-  project_id: n.project_id,
-  status: n.status,
-  is_today: n.is_today,
-  start_time: n.schedule.start_time,
-  end_time: n.schedule.end_time,
-  google_event_id: n.schedule.google_event_id,
-  attachments: n.attachments,
-  links: n.links,
-  canvas: n.canvas,
-  default_view: n.default_view,
-  sort_order: n.sort_order,
-  created_at: n.created_at,
-  updated_at: n.updated_at,
-});
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VALID_TYPES = new Set<ItemNode["type"]>(["PAGE", "MINDMAP_NODE", "TASK", "EVENT"]);
+const VALID_STATUSES = new Set<NonNullable<ItemNode["status"]>>(["BACKLOG", "TODO", "DOING", "DONE"]);
+const VALID_VIEWS = new Set<ItemNode["default_view"]>(["PAGE", "CANVAS", "BOARD"]);
+
+const toRow = (n: ItemNode, userId: string): ItemRow => {
+  const nowIso = new Date().toISOString();
+  return {
+    id: n.id,
+    user_id: userId,
+    title: typeof n.title === "string" ? n.title : "",
+    content: typeof n.content === "string" ? n.content : "",
+    icon: n.icon ?? null,
+    type: VALID_TYPES.has(n.type) ? n.type : "PAGE",
+    parent_id: n.parent_id && UUID_RE.test(n.parent_id) ? n.parent_id : null,
+    project_id: n.project_id && UUID_RE.test(n.project_id) ? n.project_id : null,
+    status: n.status && VALID_STATUSES.has(n.status) ? n.status : null,
+    is_today: Boolean(n.is_today),
+    start_time: n.schedule?.start_time || null,
+    end_time: n.schedule?.end_time || null,
+    google_event_id: n.schedule?.google_event_id || null,
+    attachments: Array.isArray(n.attachments) ? n.attachments : [],
+    links: Array.isArray(n.links) ? n.links.filter((l) => typeof l === "string" && UUID_RE.test(l)) : [],
+    canvas: n.canvas ?? null,
+    default_view: VALID_VIEWS.has(n.default_view) ? n.default_view : "PAGE",
+    sort_order: typeof n.sort_order === "number" && Number.isFinite(n.sort_order) ? n.sort_order : 0,
+    created_at: n.created_at || nowIso,
+    updated_at: n.updated_at || nowIso,
+  };
+};
 
 const fromRow = (r: ItemRow): ItemNode => ({
   id: r.id,
@@ -111,12 +119,25 @@ export class SupabaseRepository implements Repository {
       name: p.name,
       color: p.color,
       icon: p.icon,
+      is_archived: Boolean(p.is_archived),
       sort_order: p.sort_order,
       created_at: p.created_at,
       user_id: this.userId,
     }));
     const { error } = await this.client.from("projects").upsert(rows);
-    if (error) throw error;
+    if (error) {
+      const fallbackRows = projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        icon: p.icon,
+        sort_order: p.sort_order,
+        created_at: p.created_at,
+        user_id: this.userId,
+      }));
+      const { error: fallbackError } = await this.client.from("projects").upsert(fallbackRows);
+      if (fallbackError) throw fallbackError;
+    }
   }
 
   async deleteProjects(ids: string[]) {

@@ -84,6 +84,7 @@ export interface Project {
   sort_order: number;
   created_at: string;
   page_id?: string | null;
+  is_archived?: boolean;
 }
 
 export const emptySchedule = (): Schedule => ({

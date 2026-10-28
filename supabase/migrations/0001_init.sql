@@ -11,6 +11,7 @@ create table public.projects (
   name        text not null,
   color       text not null default '#7c6cff',
   icon        text,
+  is_archived boolean not null default false,
   sort_order  double precision not null default 0,
   created_at  timestamptz not null default now()
 );

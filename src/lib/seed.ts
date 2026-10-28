@@ -31,8 +31,8 @@ function item(p: Partial<ItemNode> & Pick<ItemNode, "title">): ItemNode {
 /** First-run demo data so every view has something meaningful to show. */
 export function buildSeed(): { items: ItemNode[]; projects: Project[] } {
   const t = now();
-  const rede: Project = { id: uid(), name: "Rede Cruzada", color: "#8b7bff", icon: "🕸️", sort_order: 0, created_at: t };
-  const ensitec: Project = { id: uid(), name: "Ensitec", color: "#2dd4bf", icon: "🎓", sort_order: 1, created_at: t };
+  const rede: Project = { id: uid(), name: "Rede Cruzada", color: "#8b7bff", icon: "🕸️", sort_order: 0, created_at: t, is_archived: false };
+  const ensitec: Project = { id: uid(), name: "Ensitec", color: "#2dd4bf", icon: "🎓", sort_order: 1, created_at: t, is_archived: false };
 
   const welcome = item({
     title: "Bem-vindo ao êntusis",

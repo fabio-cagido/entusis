@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
+  Archive,
+  ArchiveRestore,
   CalendarDays,
   ChevronRight,
   Cloud,
@@ -18,16 +21,20 @@ import {
   Moon,
   MoreHorizontal,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
   PenLine,
   Plus,
+  RefreshCw,
   Search,
   Star,
   Sun,
   Sunrise,
   Trash2,
+  X,
 } from "lucide-react";
 import { childrenOf, useStore, viewHref } from "@/lib/store";
-import type { ItemNode } from "@/lib/types";
+import type { ItemNode, Project } from "@/lib/types";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 
 const DRAG_MIME = "application/x-nodes-flows-id";
@@ -250,6 +257,35 @@ function NotionActionMenu({
         <span>Rename</span>
       </button>
 
+      {target.type === "project" && (
+        <button
+          className="notion-menu-item"
+          onClick={() => {
+            const pr = projects[target.id];
+            if (!pr) return;
+            const nextArchived = !pr.is_archived;
+            updateProject(pr.id, { is_archived: nextArchived });
+            onShowToast(
+              nextArchived
+                ? `Projeto "${pr.name}" arquivado`
+                : `Projeto "${pr.name}" desarquivado`
+            );
+            onClose();
+          }}
+        >
+          <span className="notion-menu-icon">
+            {projects[target.id]?.is_archived ? (
+              <ArchiveRestore size={14} />
+            ) : (
+              <Archive size={14} />
+            )}
+          </span>
+          <span>
+            {projects[target.id]?.is_archived ? "Desarquivar Projeto" : "Arquivar Projeto"}
+          </span>
+        </button>
+      )}
+
       <div className="notion-menu-divider" />
 
       <button className="notion-menu-item is-danger" onClick={handleMoveToTrash}>
@@ -432,8 +468,12 @@ function ProjectList({
   const updateProject = useStore((s) => s.updateProject);
   const params = useSearchParams();
   const pathname = usePathname();
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   const list = useMemo(() => Object.values(projects).sort((a, b) => a.sort_order - b.sort_order), [projects]);
+  const activeProjects = useMemo(() => list.filter((p) => !p.is_archived), [list]);
+  const archivedProjects = useMemo(() => list.filter((p) => p.is_archived), [list]);
+
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const it of Object.values(items)) {
@@ -441,6 +481,64 @@ function ProjectList({
     }
     return c;
   }, [items]);
+
+  const renderProjectItem = (p: Project, isArchived = false) => {
+    const active = pathname === "/board" && params.get("project") === p.id;
+    const isEditing = editingId === p.id;
+    return (
+      <li key={p.id}>
+        {isEditing ? (
+          <input
+            autoFocus
+            className="input input-sm"
+            defaultValue={p.name}
+            onBlur={(e) => {
+              updateProject(p.id, { name: e.target.value.trim() || "Sem nome" });
+              setEditingId(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") setEditingId(null);
+            }}
+          />
+        ) : (
+          <div className={`tree-row project-row ${active ? "is-active" : ""} ${isArchived ? "is-archived" : ""}`}>
+            <Link
+              href={`/board?project=${p.id}`}
+              className="tree-link"
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                setEditingId(p.id);
+              }}
+            >
+              <span className="project-dot" style={{ background: p.color }} />
+              <span className="tree-title">{p.name}</span>
+              {counts[p.id] ? <span className="count-pill">{counts[p.id]}</span> : null}
+            </Link>
+            <div className="tree-actions">
+              <button
+                className={`tree-more-btn ${menuTargetId === p.id ? "is-active" : ""}`}
+                title="Mais opções"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  onOpenMenu({
+                    id: p.id,
+                    type: "project",
+                    title: p.name,
+                    rect,
+                  });
+                }}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  };
 
   return (
     <section className="side-section">
@@ -456,64 +554,34 @@ function ProjectList({
         </button>
       </header>
       <ul className="tree">
-        {list.map((p) => {
-          const active = pathname === "/board" && params.get("project") === p.id;
-          const isEditing = editingId === p.id;
-          return (
-            <li key={p.id}>
-              {isEditing ? (
-                <input
-                  autoFocus
-                  className="input input-sm"
-                  defaultValue={p.name}
-                  onBlur={(e) => {
-                    updateProject(p.id, { name: e.target.value.trim() || "Sem nome" });
-                    setEditingId(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    if (e.key === "Escape") setEditingId(null);
-                  }}
-                />
-              ) : (
-                <div className={`tree-row project-row ${active ? "is-active" : ""}`}>
-                  <Link
-                    href={`/board?project=${p.id}`}
-                    className="tree-link"
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
-                      setEditingId(p.id);
-                    }}
-                  >
-                    <span className="project-dot" style={{ background: p.color }} />
-                    <span className="tree-title">{p.name}</span>
-                    {counts[p.id] ? <span className="count-pill">{counts[p.id]}</span> : null}
-                  </Link>
-                  <div className="tree-actions">
-                    <button
-                      className={`tree-more-btn ${menuTargetId === p.id ? "is-active" : ""}`}
-                      title="Mais opções"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                        onOpenMenu({
-                          id: p.id,
-                          type: "project",
-                          title: p.name,
-                          rect,
-                        });
-                      }}
-                    >
-                      <MoreHorizontal size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </li>
-          );
-        })}
+        {activeProjects.map((p) => renderProjectItem(p, false))}
       </ul>
+
+      <div className="side-archived-group">
+        <button
+          type="button"
+          className={`side-archived-toggle ${archivedOpen ? "is-open" : ""}`}
+          onClick={() => setArchivedOpen((o) => !o)}
+          aria-expanded={archivedOpen}
+        >
+          <ChevronRight size={13} className={`tree-chevron ${archivedOpen ? "is-open" : ""}`} />
+          <Archive size={13} className="side-archived-icon" />
+          <span className="side-archived-label">Arquivados</span>
+          {archivedProjects.length > 0 && (
+            <span className="count-pill">{archivedProjects.length}</span>
+          )}
+        </button>
+
+        {archivedOpen && (
+          <ul className="tree side-archived-list">
+            {archivedProjects.length > 0 ? (
+              archivedProjects.map((p) => renderProjectItem(p, true))
+            ) : (
+              <li className="side-archived-empty">Nenhum projeto arquivado</li>
+            )}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }
@@ -687,8 +755,14 @@ export default function Sidebar() {
   const favorites = useStore((s) => s.favorites);
   const repo = useStore((s) => s.repo);
   const sync = useStore((s) => s.sync);
+  const syncError = useStore((s) => s.syncError);
+  const flushNow = useStore((s) => s.flushNow);
+  const clearSyncError = useStore((s) => s.clearSyncError);
   const createItem = useStore((s) => s.createItem);
   const moveItem = useStore((s) => s.moveItem);
+  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
+  const setSidebarCollapsed = useStore((s) => s.setSidebarCollapsed);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -696,6 +770,25 @@ export default function Sidebar() {
   const [menuTarget, setMenuTarget] = useState<ActionMenuTarget | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [hoverPeek, setHoverPeek] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.sidebar = sidebarCollapsed ? "collapsed" : "open";
+    if (!sidebarCollapsed) {
+      setHoverPeek(false);
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "\\" || e.code === "Backslash")) {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleSidebar]);
 
   const projects = useStore((s) => s.projects);
 
@@ -717,11 +810,66 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="sidebar">
-      <Link href="/today" className="brand">
-        <span className="brand-mark" />
-        <span className="brand-name">êntusis</span>
-      </Link>
+    <>
+      {sidebarCollapsed && (
+        <>
+          <button
+            type="button"
+            id="sidebar-open-btn"
+            className="sidebar-open-trigger glass"
+            title="Expandir barra lateral (Ctrl+\)"
+            aria-label="Expandir barra lateral"
+            onClick={() => {
+              setHoverPeek(false);
+              setSidebarCollapsed(false);
+            }}
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+          <div
+            className="sidebar-edge-hover-zone"
+            onMouseEnter={() => setHoverPeek(true)}
+            aria-hidden="true"
+          />
+        </>
+      )}
+
+      <div
+        className={`sidebar-shell ${sidebarCollapsed ? "is-collapsed" : ""} ${
+          sidebarCollapsed && hoverPeek ? "is-hover-peek" : ""
+        }`}
+        onMouseLeave={() => {
+          if (sidebarCollapsed && hoverPeek && !menuTarget) {
+            setHoverPeek(false);
+          }
+        }}
+      >
+        <aside className="sidebar" aria-hidden={sidebarCollapsed && !hoverPeek}>
+          <div className="brand-row">
+            <Link href="/today" className="brand">
+              <span className="brand-mark" />
+              <span className="brand-name">êntusis</span>
+            </Link>
+            <button
+              type="button"
+              id="sidebar-collapse-btn"
+              className="icon-btn sidebar-toggle-btn"
+              title={
+                sidebarCollapsed
+                  ? "Fixar barra lateral aberta (Ctrl+\\)"
+                  : "Recolher barra lateral (Ctrl+\\)"
+              }
+              aria-label={
+                sidebarCollapsed ? "Fixar barra lateral aberta" : "Recolher barra lateral"
+              }
+              onClick={() => {
+                setHoverPeek(false);
+                toggleSidebar();
+              }}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+          </div>
 
       <QuickSearch />
 
@@ -863,6 +1011,8 @@ export default function Sidebar() {
           />
         </Suspense>
       )}
+        </aside>
+      </div>
 
       {/* Toast Notification */}
       {toastMsg && (
@@ -870,6 +1020,35 @@ export default function Sidebar() {
           <span>{toastMsg}</span>
         </div>
       )}
-    </aside>
+
+      {/* Alerta Visível de Erro de Sincronização */}
+      {syncError && (
+        <div className="sync-error-toast" role="alert">
+          <AlertTriangle size={16} className="sync-error-icon" />
+          <div className="sync-error-body">
+            <strong>Erro de sincronização</strong>
+            <span>{syncError}</span>
+          </div>
+          <button
+            type="button"
+            className="sync-error-retry"
+            onClick={() => void flushNow()}
+            title="Tentar salvar novamente agora"
+          >
+            <RefreshCw size={13} />
+            <span>Tentar novamente</span>
+          </button>
+          <button
+            type="button"
+            className="sync-error-close"
+            onClick={clearSyncError}
+            title="Fechar alerta"
+            aria-label="Fechar alerta"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+    </>
   );
 }
