@@ -150,7 +150,7 @@ export const useStore = create<State>((set, get) => {
           : typeof e === "object" && e !== null && "message" in e
           ? String((e as { message: unknown }).message)
           : String(e);
-      console.error("[êntusis] sync failed", e);
+      console.error("[ayolia] sync failed", e);
       set({
         sync: "error",
         syncError: `Falha ao sincronizar com o banco: ${errMsg}`,
@@ -205,10 +205,15 @@ export const useStore = create<State>((set, get) => {
           }
           const theme = (typeof window !== "undefined" && (localStorage.getItem("nf-theme") as Theme)) || "system";
           const sidebarCollapsed =
-            typeof window !== "undefined" && localStorage.getItem("entusis_sidebar_collapsed") === "true";
+            typeof window !== "undefined" &&
+            (localStorage.getItem("ayolia_sidebar_collapsed") ?? localStorage.getItem("entusis_sidebar_collapsed")) ===
+              "true";
           const rawTodayFilter =
             typeof window !== "undefined"
-              ? localStorage.getItem("entusis_today_task_filter")?.toLowerCase()
+              ? (
+                  localStorage.getItem("ayolia_today_task_filter") ??
+                  localStorage.getItem("entusis_today_task_filter")
+                )?.toLowerCase()
               : null;
           const todayTaskFilter: TodayTaskFilter =
             rawTodayFilter === "all" || rawTodayFilter === "doing" ? rawTodayFilter : "doing";
@@ -334,12 +339,12 @@ export const useStore = create<State>((set, get) => {
 
           if (duplicateProjectPageIdsToDelete.length > 0) {
             console.info(
-              `[êntusis] Removendo ${duplicateProjectPageIdsToDelete.length} páginas raízes de projetos duplicadas...`
+              `[ayolia] Removendo ${duplicateProjectPageIdsToDelete.length} páginas raízes de projetos duplicadas...`
             );
             try {
               await r.deleteItems(duplicateProjectPageIdsToDelete);
             } catch (cleanupErr) {
-              console.error("[êntusis] Erro ao limpar páginas duplicadas:", cleanupErr);
+              console.error("[ayolia] Erro ao limpar páginas duplicadas:", cleanupErr);
             }
           }
 
@@ -732,6 +737,7 @@ export const useStore = create<State>((set, get) => {
     toggleSidebar() {
       const next = !get().sidebarCollapsed;
       if (typeof window !== "undefined") {
+        localStorage.setItem("ayolia_sidebar_collapsed", String(next));
         localStorage.setItem("entusis_sidebar_collapsed", String(next));
       }
       set({ sidebarCollapsed: next });
@@ -739,6 +745,7 @@ export const useStore = create<State>((set, get) => {
 
     setSidebarCollapsed(collapsed) {
       if (typeof window !== "undefined") {
+        localStorage.setItem("ayolia_sidebar_collapsed", String(collapsed));
         localStorage.setItem("entusis_sidebar_collapsed", String(collapsed));
       }
       set({ sidebarCollapsed: collapsed });
@@ -747,6 +754,7 @@ export const useStore = create<State>((set, get) => {
     setTodayTaskFilter(filter) {
       const normalized: TodayTaskFilter = filter === "all" ? "all" : "doing";
       if (typeof window !== "undefined") {
+        localStorage.setItem("ayolia_today_task_filter", normalized);
         localStorage.setItem("entusis_today_task_filter", normalized);
       }
       set({ todayTaskFilter: normalized });

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
   CalendarClock,
   ExternalLink,
   FileBox,
@@ -11,19 +12,25 @@ import {
   HardDrive,
   KanbanSquare,
   Link2,
+  Loader2,
+  Paperclip,
   Plus,
   Repeat,
   Sunrise,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { ancestorsOf, childrenOf, useStore, viewHref } from "@/lib/store";
 import { ITEM_TYPES, STATUSES, STATUS_LABEL, TYPE_LABEL, WEEKDAY_LABEL } from "@/lib/types";
 import type { Attachment, ItemNode, ItemType, RecurrenceType, Status } from "@/lib/types";
 import { detectAttachmentKind, formatWhen, fromLocalInput, toLocalInput, typeIcon } from "@/lib/format";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import RichEditor from "./RichEditor";
 import ViewSwitcher from "./ViewSwitcher";
 import { connectGoogleCalendar, createGoogleCalendarEvent, isGcalConnected } from "@/lib/google/calendar";
+
+const ATTACHMENTS_BUCKET = "attachments";
 
 const EMOJIS = ["📄", "🧠", "🎯", "🚀", "💡", "📌", "📚", "🗂️", "🕸️", "🎓", "⚙️", "🔥", "✨", "📈", "🧩", "🌱"];
 
@@ -328,24 +335,186 @@ function Children({ item, compact }: { item: ItemNode; compact?: boolean }) {
 
 /* ------------------------------------------------------------------ */
 
+function formatFileSize(bytes?: number): string | null {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function Attachments({ item }: { item: ItemNode }) {
   const updateItem = useStore((s) => s.updateItem);
+  const flushNow = useStore((s) => s.flushNow);
+  const currentUserId = useStore((s) => s.currentUserId);
   const [url, setUrl] = useState("");
   const [label, setLabel] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const triggerFilePicker = () => {
+    if (uploading) return;
+    setUploadError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      const sb = getSupabase();
+      const uploadedAttachments: Attachment[] = [];
+
+      for (const file of files) {
+        const safeFileName =
+          file.name
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9._-]+/g, "_")
+            .replace(/^_+|_+$/g, "") || "arquivo";
+
+        if (isSupabaseConfigured && sb) {
+          let userId = currentUserId;
+          if (!userId) {
+            const { data: authData, error: authErr } = await sb.auth.getUser();
+            if (authErr) {
+              console.error("[ayolia] Erro ao obter usuário autenticado antes do upload:", authErr);
+            }
+            userId = authData.user?.id ?? null;
+          }
+
+          if (!userId) {
+            throw new Error("Sessão não autenticada. Faça login novamente para enviar arquivos.");
+          }
+
+          const storagePath = `${userId}/${item.id}/${Date.now()}-${safeFileName}`;
+
+          const { data: uploadData, error: storageErr } = await sb.storage
+            .from(ATTACHMENTS_BUCKET)
+            .upload(storagePath, file, {
+              cacheControl: "3600",
+              upsert: false,
+              contentType: file.type || "application/octet-stream",
+            });
+
+          if (storageErr) {
+            console.error("[ayolia] Falha no upload para Supabase Storage:", {
+              bucket: ATTACHMENTS_BUCKET,
+              storagePath,
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type,
+              error: storageErr,
+            });
+            const msg = storageErr.message || String(storageErr);
+            if (msg.toLowerCase().includes("bucket not found")) {
+              throw new Error(
+                `O bucket "${ATTACHMENTS_BUCKET}" não existe no Supabase Storage. Execute a migration 0004_storage_attachments.sql no SQL Editor do Supabase.`
+              );
+            }
+            if (msg.toLowerCase().includes("row-level security") || msg.toLowerCase().includes("unauthorized")) {
+              throw new Error(
+                `Permissão negada pelo RLS do Supabase Storage (${msg}). Execute a migration 0004_storage_attachments.sql no SQL Editor do Supabase.`
+              );
+            }
+            throw new Error(`Falha ao enviar "${file.name}": ${msg}`);
+          }
+
+          const finalPath = uploadData?.path || storagePath;
+          const { data: publicUrlData } = sb.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(finalPath);
+
+          if (!publicUrlData?.publicUrl) {
+            console.error("[ayolia] Não foi possível gerar a URL pública para o arquivo:", finalPath);
+            throw new Error("Não foi possível obter a URL pública do arquivo enviado.");
+          }
+
+          uploadedAttachments.push({
+            id: crypto.randomUUID(),
+            url: publicUrlData.publicUrl,
+            label: files.length === 1 && label.trim() ? label.trim() : file.name,
+            kind: "file",
+            storage_path: finalPath,
+            size: file.size,
+            mime_type: file.type || "application/octet-stream",
+          });
+        } else {
+          // Modo local-first (sem Supabase configurado)
+          const objectUrl = URL.createObjectURL(file);
+          uploadedAttachments.push({
+            id: crypto.randomUUID(),
+            url: objectUrl,
+            label: files.length === 1 && label.trim() ? label.trim() : file.name,
+            kind: "file",
+            size: file.size,
+            mime_type: file.type || "application/octet-stream",
+          });
+        }
+      }
+
+      const currentList = useStore.getState().items[item.id]?.attachments ?? item.attachments ?? [];
+      updateItem(item.id, { attachments: [...currentList, ...uploadedAttachments] });
+      setLabel("");
+
+      try {
+        await flushNow();
+      } catch (persistErr) {
+        console.error("[ayolia] Erro ao persistir metadados do anexo em item_nodes:", persistErr);
+        throw new Error(
+          persistErr instanceof Error
+            ? `Arquivo enviado, mas houve falha ao salvar na página: ${persistErr.message}`
+            : "Arquivo enviado, mas houve falha ao salvar na página."
+        );
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[ayolia] Erro no fluxo de anexo de arquivo:", err);
+      setUploadError(errMsg);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const add = (e: React.FormEvent) => {
     e.preventDefault();
     const u = url.trim();
-    if (!u) return;
+    if (!u) {
+      // Se o usuário clicar em "+ Anexar" sem URL preenchida, abre o seletor de arquivos locais
+      triggerFilePicker();
+      return;
+    }
+    setUploadError(null);
+    const normalizedUrl = /^https?:\/\//i.test(u) ? u : `https://${u}`;
     const a: Attachment = {
       id: crypto.randomUUID(),
-      url: u,
+      url: normalizedUrl,
       label: label.trim() || u.replace(/^https?:\/\//, "").slice(0, 60),
-      kind: detectAttachmentKind(u),
+      kind: detectAttachmentKind(normalizedUrl),
     };
     updateItem(item.id, { attachments: [...item.attachments, a] });
     setUrl("");
     setLabel("");
+  };
+
+  const handleRemoveAttachment = async (a: Attachment) => {
+    updateItem(item.id, { attachments: item.attachments.filter((x) => x.id !== a.id) });
+    if (a.storage_path && isSupabaseConfigured) {
+      const sb = getSupabase();
+      if (sb) {
+        const { error } = await sb.storage.from(ATTACHMENTS_BUCKET).remove([a.storage_path]);
+        if (error) {
+          console.error("[ayolia] Erro ao remover arquivo do Supabase Storage:", {
+            bucket: ATTACHMENTS_BUCKET,
+            storagePath: a.storage_path,
+            error,
+          });
+        }
+      }
+    }
   };
 
   const icon = (k: Attachment["kind"]) =>
@@ -354,30 +523,130 @@ function Attachments({ item }: { item: ItemNode }) {
   return (
     <section className="panel">
       <header className="panel-head">
-        <h3>Anexos &amp; links externos <span className="muted">{item.attachments.length}</span></h3>
+        <h3>
+          <Paperclip size={14} /> Anexos &amp; links externos{" "}
+          <span className="muted">{item.attachments.length}</span>
+        </h3>
+        <div className="panel-actions">
+          <button
+            id="attach-file-btn"
+            type="button"
+            className="btn btn-ghost btn-xs"
+            onClick={triggerFilePicker}
+            disabled={uploading}
+            title="Selecionar arquivo do computador para anexar"
+          >
+            {uploading ? (
+              <>
+                <Loader2 size={13} className="spin" /> Enviando…
+              </>
+            ) : (
+              <>
+                <Upload size={13} /> Enviar arquivo
+              </>
+            )}
+          </button>
+        </div>
       </header>
+
+      <input
+        ref={fileInputRef}
+        id="attach-file-input"
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={handleFileChange}
+      />
+
+      {uploadError && (
+        <div
+          className="attach-error-banner"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 10px",
+            marginBottom: 10,
+            borderRadius: "var(--radius-sm)",
+            background: "rgba(239, 68, 68, 0.12)",
+            border: "1px solid rgba(239, 68, 68, 0.35)",
+            color: "#ef4444",
+            fontSize: "0.78rem",
+            lineHeight: 1.4,
+          }}
+        >
+          <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ flex: 1 }}>{uploadError}</span>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setUploadError(null)}
+            title="Fechar aviso"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {item.attachments.length > 0 && (
         <ul className="attach-list">
-          {item.attachments.map((a) => (
-            <li key={a.id} className={`attach attach-${a.kind}`}>
-              {icon(a.kind)}
-              <a href={a.url} target="_blank" rel="noopener noreferrer">{a.label}</a>
-              <ExternalLink size={12} className="muted" />
-              <button
-                className="icon-btn"
-                title="Remover"
-                onClick={() => updateItem(item.id, { attachments: item.attachments.filter((x) => x.id !== a.id) })}
-              >
-                <X size={13} />
-              </button>
-            </li>
-          ))}
+          {item.attachments.map((a) => {
+            const sizeLabel = formatFileSize(a.size);
+            return (
+              <li key={a.id} className={`attach attach-${a.kind}`}>
+                {icon(a.kind)}
+                <a href={a.url} target="_blank" rel="noopener noreferrer">
+                  {a.label}
+                </a>
+                {sizeLabel && (
+                  <span className="muted" style={{ fontSize: "0.7rem", marginLeft: 4 }}>
+                    ({sizeLabel})
+                  </span>
+                )}
+                <ExternalLink size={12} className="muted" />
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Remover anexo"
+                  onClick={() => void handleRemoveAttachment(a)}
+                >
+                  <X size={13} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       <form className="inline-form" onSubmit={add}>
-        <input id="attach-url" className="input" placeholder="Cole uma URL (Drive, site, arquivo…)" value={url} onChange={(e) => setUrl(e.target.value)} />
-        <input id="attach-label" className="input input-narrow" placeholder="Rótulo (opcional)" value={label} onChange={(e) => setLabel(e.target.value)} />
-        <button id="attach-add" className="btn btn-xs" type="submit"><Plus size={13} /> Anexar</button>
+        <input
+          id="attach-url"
+          className="input"
+          placeholder="Cole uma URL (Drive, site…) ou clique em Enviar arquivo"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <input
+          id="attach-label"
+          className="input input-narrow"
+          placeholder="Rótulo (opcional)"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+        <button id="attach-add" className="btn btn-xs" type="submit" disabled={uploading}>
+          {uploading ? (
+            <>
+              <Loader2 size={13} className="spin" /> Enviando…
+            </>
+          ) : url.trim() ? (
+            <>
+              <Plus size={13} /> Anexar link
+            </>
+          ) : (
+            <>
+              <Upload size={13} /> Anexar arquivo
+            </>
+          )}
+        </button>
       </form>
     </section>
   );

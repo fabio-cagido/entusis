@@ -40,7 +40,7 @@ export function buildSeed(): { items: ItemNode[]; projects: Project[] } {
   const ensitec: Project = { id: uid(), name: "Ensitec", color: "#2dd4bf", icon: "🎓", sort_order: 1, created_at: t, is_archived: false };
 
   const welcome = item({
-    title: "Bem-vindo ao êntusis",
+    title: "Bem-vindo ao ayolia",
     icon: "👋",
     sort_order: 0,
     content:

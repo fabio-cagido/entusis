@@ -330,7 +330,7 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
 
                 {/* Lista de Eventos do Dia */}
                 <div className="week-day-events">
-                  {/* Eventos Nativos do êntusis */}
+                  {/* Eventos Nativos do ayolia */}
                   {dayEvents.map((evt) => {
                     const project = evt.project_id ? projects[evt.project_id] : null;
                     const startTime = new Date(evt.schedule.start_time!);

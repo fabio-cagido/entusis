@@ -3,9 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Network, Plus, Upload, UserPlus, Users } from "lucide-react";
+import { Network, Plus, Search, Upload, UserPlus, Users, X } from "lucide-react";
 import { descendantsOf, useStore } from "@/lib/store";
 import ImportMindMapModal from "./ImportMindMapModal";
+
+const normalizeText = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 
 export default function CanvasIndex() {
   const items = useStore((s) => s.items);
@@ -17,6 +23,7 @@ export default function CanvasIndex() {
   const router = useRouter();
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const shareCountByItem = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -34,6 +41,16 @@ export default function CanvasIndex() {
         .map((m) => ({ m, count: descendantsOf(items, m.id).length })),
     [items],
   );
+
+  const filteredMaps = useMemo(() => {
+    const q = normalizeText(searchQuery.trim());
+    if (!q) return maps;
+    return maps.filter(({ m }) => {
+      const titleNorm = normalizeText(m.title || "Sem título");
+      const projNameNorm = m.project_id && projects[m.project_id] ? normalizeText(projects[m.project_id].name) : "";
+      return titleNorm.includes(q) || projNameNorm.includes(q);
+    });
+  }, [maps, searchQuery, projects]);
 
   const create = () => {
     const n = createItem({ title: "Novo mapa mental", icon: "🧠", default_view: "CANVAS", canvas: { x: 0, y: 0, color: "#8b7bff" } });
@@ -62,8 +79,46 @@ export default function CanvasIndex() {
           </button>
         </div>
       </header>
+      <div className="map-search-bar">
+        <div className="map-search-input-wrap">
+          <Search size={15} className="map-search-icon" />
+          <input
+            id="mindmap-search-input"
+            type="text"
+            className="map-search-input"
+            placeholder="Pesquisar mapa mental pelo nome..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="icon-btn map-search-clear"
+              title="Limpar pesquisa"
+              onClick={() => setSearchQuery("")}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <span className="muted small map-search-count">
+          {searchQuery.trim()
+            ? `${filteredMaps.length} de ${maps.length} ${maps.length === 1 ? "mapa" : "mapas"}`
+            : `${maps.length} ${maps.length === 1 ? "mapa" : "mapas"}`}
+        </span>
+      </div>
+
+      {filteredMaps.length === 0 && searchQuery.trim() ? (
+        <div className="map-search-empty glass">
+          <p className="muted">Nenhum mapa mental encontrado para &ldquo;{searchQuery.trim()}&rdquo;.</p>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSearchQuery("")}>
+            Limpar busca
+          </button>
+        </div>
+      ) : null}
+
       <div className="map-grid">
-        {maps.map(({ m, count }) => {
+        {filteredMaps.map(({ m, count }) => {
           const p = m.project_id ? projects[m.project_id] : null;
           const isSharedWithMe = Boolean(m.user_id && currentUserId && m.user_id !== currentUserId);
           const shareCount = shareCountByItem[m.id] ?? 0;

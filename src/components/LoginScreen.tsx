@@ -101,7 +101,7 @@ export default function LoginScreen() {
     <div className="login">
       <div className="login-card glass">
         <div className="brand-mark brand-mark--lg" />
-        <h1>êntusis</h1>
+        <h1>ayolia</h1>
         <p className="muted">Páginas, mapas mentais e agenda em uma única base.</p>
 
         <button id="login-google" className="btn btn-primary btn-block" onClick={handleGoogle}>

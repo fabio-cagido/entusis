@@ -38,9 +38,9 @@ export function parseMindMapJson(raw: string | object): ParsedMindMap {
     throw new Error("O arquivo JSON está vazio ou não contém um objeto válido.");
   }
 
-  // 1. Êntusis exported items { format: "entusis.mindmap", items: [...], edges: [...] }
-  if (isEntusisExport(doc)) {
-    return parseEntusisExport(doc);
+  // 1. Ayolia exported items { format: "ayolia.mindmap", items: [...], edges: [...] }
+  if (isAyoliaExport(doc)) {
+    return parseAyoliaExport(doc);
   }
 
   // 2. Lucidchart MindMap format
@@ -490,17 +490,24 @@ function parseNodesAndEdges(doc: any): ParsedMindMap {
 }
 
 /* ================================================================== */
-/* 4. Êntusis Export Parser                                           */
+/* 4. Ayolia Export Parser                                            */
 /* ================================================================== */
 
-function isEntusisExport(doc: any): boolean {
-  if (doc?.format === "entusis.mindmap" || doc?.format === "entusis.canvas") return true;
+function isAyoliaExport(doc: any): boolean {
+  if (
+    doc?.format === "ayolia.mindmap" ||
+    doc?.format === "ayolia.canvas" ||
+    doc?.format === "entusis.mindmap" ||
+    doc?.format === "entusis.canvas"
+  ) {
+    return true;
+  }
   if (Array.isArray(doc)) return doc.every((d) => d && typeof d.id === "string" && typeof d.title === "string");
   if (Array.isArray(doc.items)) return doc.items.every((d: any) => d && typeof d.id === "string");
   return false;
 }
 
-function parseEntusisExport(doc: any): ParsedMindMap {
+function parseAyoliaExport(doc: any): ParsedMindMap {
   const rawList: ItemNode[] = Array.isArray(doc) ? doc : doc.items;
   if (rawList.length === 0) throw new Error("A lista de nós exportada está vazia.");
   const t = now();

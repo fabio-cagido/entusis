@@ -1,8 +1,8 @@
 import type { ItemNode } from "../types";
 import { descendantsOf } from "../store";
 
-export const ENTUSIS_EXPORT_FORMAT = "entusis.mindmap";
-export const ENTUSIS_EXPORT_VERSION = 2;
+export const AYOLIA_EXPORT_FORMAT = "ayolia.mindmap";
+export const AYOLIA_EXPORT_VERSION = 2;
 
 export type ProcessAnchor = "right" | "bottom" | "left" | "top";
 
@@ -20,10 +20,10 @@ export interface ProcessConnectionExport {
 
 /**
  * Lossless mind-map and process flow backup. Readable back by `parseMindMapJson`
- * (see importers/mindmap.ts → "Êntusis Export Parser").
+ * (see importers/mindmap.ts → "Ayolia Export Parser").
  */
 export interface MindMapExport {
-  format: typeof ENTUSIS_EXPORT_FORMAT;
+  format: typeof AYOLIA_EXPORT_FORMAT;
   version: number;
   exported_at: string;
   title: string;
@@ -142,8 +142,8 @@ export function buildMindMapExport(items: Record<string, ItemNode>, rootId: stri
   }
 
   return {
-    format: ENTUSIS_EXPORT_FORMAT,
-    version: ENTUSIS_EXPORT_VERSION,
+    format: AYOLIA_EXPORT_FORMAT,
+    version: AYOLIA_EXPORT_VERSION,
     exported_at: new Date().toISOString(),
     title: root.title || "Mapa mental",
     root_id: rootId,

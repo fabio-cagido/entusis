@@ -303,7 +303,10 @@ export default function TodayView() {
   useEffect(() => {
     checkRecurringTasks();
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("entusis_today_task_filter")?.toLowerCase();
+      const saved = (
+        localStorage.getItem("ayolia_today_task_filter") ??
+        localStorage.getItem("entusis_today_task_filter")
+      )?.toLowerCase();
       if (saved === "all" || saved === "doing") {
         setGlobalFilter(saved);
       } else {

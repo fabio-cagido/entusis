@@ -1,4 +1,4 @@
--- êntusis — Migration 0002: Mind Map Sharing (Multi-user Access via RLS)
+-- ayolia — Migration 0002: Mind Map Sharing (Multi-user Access via RLS)
 -- Paste into Supabase → SQL Editor and run.
 
 -- 1. Tabela de compartilhamento por e-mail

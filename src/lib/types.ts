@@ -38,6 +38,9 @@ export interface Attachment {
   url: string;
   label: string;
   kind: AttachmentKind;
+  storage_path?: string;
+  size?: number;
+  mime_type?: string;
 }
 
 export type ProcessShape = "rectangle" | "diamond" | "circle";

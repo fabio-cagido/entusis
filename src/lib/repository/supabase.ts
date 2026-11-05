@@ -266,7 +266,7 @@ export class SupabaseRepository implements Repository {
   }
 
   subscribe(onChange: (c: RemoteChange) => void) {
-    const channelTopic = `entusis-changes-${crypto.randomUUID()}`;
+    const channelTopic = `ayolia-changes-${crypto.randomUUID()}`;
     const channel = this.client
       .channel(channelTopic)
       .on(

@@ -907,7 +907,7 @@ export default function Sidebar() {
           <div className="brand-row">
             <Link href="/today" className="brand">
               <span className="brand-mark" />
-              <span className="brand-name">êntusis</span>
+              <span className="brand-name">ayolia</span>
             </Link>
             <button
               type="button"
