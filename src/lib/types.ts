@@ -19,7 +19,7 @@ export const TYPE_LABEL: Record<ItemType, string> = {
 };
 
 export const STATUS_LABEL: Record<Status, string> = {
-  BACKLOG: "Backlog",
+  BACKLOG: "Brainstorming",
   TODO: "A fazer",
   DOING: "Fazendo",
   DONE: "Concluído",
@@ -73,6 +73,7 @@ export interface CanvasMeta {
   width?: number | null;
   height?: number | null;
   recurrence?: RecurrenceMeta | null;
+  deleted_at?: string | null;
 }
 
 export interface ItemNode {
@@ -95,6 +96,8 @@ export interface ItemNode {
   recurrence_day_of_month?: number | null;
   recurrence_day_of_week?: number | null;
   last_recurred_at?: string | null;
+  /** Soft-delete timestamp (ISO). When non-null, item is in the Trash (retained for 7 days). */
+  deleted_at?: string | null;
   schedule: Schedule;
   attachments: Attachment[];
   /** UUIDs of other linked ItemNodes. */

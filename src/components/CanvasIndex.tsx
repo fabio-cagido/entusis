@@ -61,9 +61,9 @@ export default function CanvasIndex() {
     <div className="view">
       <header className="view-head">
         <div>
-          <p className="eyebrow">Canvas infinito</p>
+          <p className="eyebrow">Mapa infinito</p>
           <h1 className="view-title">Mapas mentais</h1>
-          <p className="muted">Qualquer página também pode ser aberta como canvas pelo seletor de visão.</p>
+          <p className="muted">Qualquer página também pode ser aberta como mapa pelo seletor de visão.</p>
         </div>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button

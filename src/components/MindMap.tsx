@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
@@ -50,7 +51,7 @@ import {
   Wand2,
   Workflow,
 } from "lucide-react";
-import { descendantsOf, useStore } from "@/lib/store";
+import { descendantsOf, getKanbanStatusForNode, useStore } from "@/lib/store";
 import { STATUS_LABEL } from "@/lib/types";
 import type { ItemNode, ProcessShape } from "@/lib/types";
 import {
@@ -214,7 +215,9 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
       <Handle type="source" position={Position.Right} id="r-s" className="mind-handle" />
 
       <div className="mind-main">
-        <span className="mind-icon">{item.type === "PAGE" ? "📄" : typeIcon(item)}</span>
+        {!(item.icon && item.title?.startsWith(item.icon)) && (
+          <span className="mind-icon">{item.type === "PAGE" ? "📄" : typeIcon(item)}</span>
+        )}
         {editing ? (
           <textarea
             ref={textareaRef}
@@ -704,6 +707,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const deleteItem = useStore((s) => s.deleteItem);
   const toggleLink = useStore((s) => s.toggleLink);
   const openDrawer = useStore((s) => s.openDrawer);
+  const ensureProjectKanbanBranch = useStore((s) => s.ensureProjectKanbanBranch);
   const rf = useReactFlow();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -788,16 +792,23 @@ function MindMapInner({ rootId }: { rootId: string }) {
     return mindScope.filter((s) => !hidden.has(s.id));
   }, [mindScope, collapsed, items, rootId]);
 
-  /* ---- first open: lay out mind tree nodes with deterministic auto-layout ---- */
+  /* ---- garante ramo "📋 Kanban" em mapas de projetos existentes (não-destrutivo) ---- */
+  useEffect(() => {
+    if (root?.project_id && !root.parent_id) {
+      ensureProjectKanbanBranch(root.project_id);
+    }
+  }, [root?.id, root?.project_id, root?.parent_id, ensureProjectKanbanBranch]);
+
+  /* ---- first open: lay out only unplaced mind tree nodes without moving already-placed nodes ---- */
   useEffect(() => {
     if (!root) return;
     const unplaced = mindScope.filter((s) => !s.canvas);
     if (!unplaced.length) return;
     const pos = layoutTree(mindScope, rootId, collapsed, dimensionsRef.current);
     updateItems(
-      mindScope.map((s) => ({
+      unplaced.map((s) => ({
         id: s.id,
-        patch: { canvas: { color: s.canvas?.color ?? null, ...pos[s.id] } },
+        patch: { canvas: { color: s.canvas?.color ?? null, ...(pos[s.id] ?? { x: 0, y: 0 }) } },
       })),
     );
   }, [mindScope, root, rootId, collapsed, updateItems]);
@@ -1272,12 +1283,20 @@ function MindMapInner({ rootId }: { rootId: string }) {
               : rootX - 160
             : targetItem?.canvas?.x ?? node.position.x;
 
+        // Se o nó de destino for um dos 4 sub-nós de status do Kanban ("Backlog", "A Fazer", "Fazendo", "Concluído"),
+        // atualiza imediatamente o campo status da tarefa para refletir no quadro Kanban.
+        const matchedKanbanStatus = getKanbanStatusForNode(items, targetParentId);
+
         const updatedItems: Record<string, ItemNode> = {
           ...items,
           [node.id]: {
             ...draggedItem,
             parent_id: targetParentId,
             sort_order: nextSortOrder,
+            ...(matchedKanbanStatus ? { status: matchedKanbanStatus } : {}),
+            ...(matchedKanbanStatus && targetItem?.project_id
+              ? { project_id: targetItem.project_id }
+              : {}),
             canvas: {
               ...(draggedItem.canvas ?? { x: targetSideX, y: node.position.y }),
               x: targetSideX,
@@ -1288,13 +1307,17 @@ function MindMapInner({ rootId }: { rootId: string }) {
         const newPositions = layoutTree(updatedItems, rootId, nextCollapsed, dimensionsRef.current);
         const patches: { id: string; patch: Partial<ItemNode> }[] = [];
 
-        // Patch principal do nó reparentado (atualiza parent_id, sort_order e posição calculada)
+        // Patch principal do nó reparentado (atualiza parent_id, sort_order, status se aplicável e posição calculada)
         const reparentedPos = newPositions[node.id] ?? { x: targetSideX, y: node.position.y };
         patches.push({
           id: node.id,
           patch: {
             parent_id: targetParentId,
             sort_order: nextSortOrder,
+            ...(matchedKanbanStatus ? { status: matchedKanbanStatus } : {}),
+            ...(matchedKanbanStatus && targetItem?.project_id
+              ? { project_id: targetItem.project_id }
+              : {}),
             canvas: {
               ...(draggedItem.canvas ?? {}),
               ...reparentedPos,
@@ -1822,6 +1845,16 @@ function MindMapInner({ rootId }: { rootId: string }) {
                 <Users size={11} />
                 <span>Compartilhado</span>
               </span>
+            )}
+            {root.project_id && (
+              <Link
+                href={`/board?project=${root.project_id}&tab=kanban`}
+                className="btn btn-ghost btn-xs"
+                title="Abrir quadro Kanban do projeto"
+              >
+                <KanbanSquare size={13} />
+                <span>Quadro Kanban</span>
+              </Link>
             )}
             <ViewSwitcher id={root.id} />
           </Panel>

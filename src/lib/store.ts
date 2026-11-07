@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { ItemNode, ItemShare, Project } from "./types";
+import type { ItemNode, ItemShare, Project, Status } from "./types";
 import { WEEKDAY_LABEL } from "./types";
 import type { Repository, RemoteChange } from "./repository/types";
 import { LocalRepository } from "./repository/local";
@@ -11,16 +11,224 @@ type Theme = "system" | "light" | "dark";
 type SyncState = "idle" | "saving" | "error";
 export type TodayTaskFilter = "all" | "doing";
 
+export const TRASH_RETENTION_DAYS = 7;
+export const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+export const KANBAN_STATUS_NODES: {
+  status: Status;
+  title: string;
+  icon: string;
+  color: string;
+  sort_order: number;
+}[] = [
+  { status: "BACKLOG", title: "Brainstorming", icon: "💡", color: "#94a3b8", sort_order: 0 },
+  { status: "TODO", title: "A Fazer", icon: "📝", color: "#38bdf8", sort_order: 10 },
+  { status: "DOING", title: "Fazendo", icon: "⚡", color: "#facc15", sort_order: 20 },
+  { status: "DONE", title: "Concluído", icon: "✅", color: "#2dd4bf", sort_order: 30 },
+];
+
+export function isKanbanRootTitle(title: string | null | undefined): boolean {
+  const norm = (title || "")
+    .replace(/^📋\s*/, "")
+    .trim()
+    .toLowerCase();
+  return norm === "kanban";
+}
+
+export function statusFromKanbanNodeTitle(title: string | null | undefined): Status | null {
+  const norm = (title || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .trim()
+    .toLowerCase();
+  if (norm === "brainstorming" || norm === "brainstorm" || norm === "backlog") return "BACKLOG";
+  if (norm === "a fazer" || norm === "todo") return "TODO";
+  if (norm === "fazendo" || norm === "doing" || norm === "em andamento") return "DOING";
+  if (norm === "concluido" || norm === "concluidas" || norm === "done") return "DONE";
+  return null;
+}
+
+export function getKanbanStatusForNode(
+  items: Record<string, ItemNode>,
+  nodeId: string | null | undefined
+): Status | null {
+  if (!nodeId || !items[nodeId]) return null;
+  const node = items[nodeId];
+  return statusFromKanbanNodeTitle(node.title);
+}
+
+export function isChildOfKanbanStatusNode(
+  items: Record<string, ItemNode>,
+  item: ItemNode | null | undefined
+): boolean {
+  if (!item?.parent_id) return false;
+  const parent = items[item.parent_id];
+  if (!parent) return false;
+  const parentStatus = statusFromKanbanNodeTitle(parent.title);
+  if (!parentStatus) return false;
+  if (parent.parent_id && items[parent.parent_id]) {
+    return isKanbanRootTitle(items[parent.parent_id].title);
+  }
+  return parent.status === null;
+}
+
+export function findProjectKanbanStatusNode(
+  items: Record<string, ItemNode>,
+  projectId: string | null | undefined,
+  status: Status,
+  projectRootId?: string | null
+): ItemNode | null {
+  if (!projectId && !projectRootId) return null;
+  const all = Object.values(items);
+  const kanbanRoot = all.find(
+    (it) =>
+      isKanbanRootTitle(it.title) &&
+      ((projectRootId && it.parent_id === projectRootId) ||
+        (projectId && it.project_id === projectId))
+  );
+  if (!kanbanRoot) return null;
+  return (
+    all.find(
+      (it) =>
+        it.parent_id === kanbanRoot.id && statusFromKanbanNodeTitle(it.title) === status
+    ) ?? null
+  );
+}
+
+function injectKanbanBranchIntoMap(
+  itemsMap: Record<string, ItemNode>,
+  pr: Project,
+  rootPage: ItemNode,
+  userId?: string | null
+): string[] {
+  const touched: string[] = [];
+
+  if (!rootPage.canvas) {
+    rootPage.canvas = { x: 0, y: 0, color: pr.color || "#8b7bff" };
+    touched.push(rootPage.id);
+  }
+
+  const rootX = rootPage.canvas?.x ?? 0;
+  const rootY = rootPage.canvas?.y ?? 0;
+
+  // Coleta todos os descendentes já existentes do mapa do projeto para calcular área livre sem sobreposição
+  const existingDescendants = descendantsOf(itemsMap, rootPage.id);
+  const existingPlaced = existingDescendants.filter((n) => n.canvas && !isKanbanRootTitle(n.title));
+
+  let kanbanNode = Object.values(itemsMap).find(
+    (it) => it.parent_id === rootPage.id && isKanbanRootTitle(it.title)
+  );
+
+  // Calcula Y livre abaixo de todos os nós existentes (ou alinhado à raiz se não houver nós posicionados)
+  let kanbanCenterY = rootY;
+  if (existingPlaced.length > 0) {
+    const maxBottomY = Math.max(
+      rootY + 60,
+      ...existingPlaced.map((n) => (n.canvas?.y ?? 0) + (n.canvas?.height ?? 60))
+    );
+    kanbanCenterY = maxBottomY + 180;
+  }
+
+  const kanbanX = rootX + 280;
+
+  if (!kanbanNode) {
+    kanbanNode = newItem({
+      title: "📋 Kanban",
+      icon: "📋",
+      type: "MINDMAP_NODE",
+      parent_id: rootPage.id,
+      project_id: pr.id,
+      status: null,
+      sort_order: 900,
+      ...(userId ? { user_id: userId } : {}),
+      canvas: {
+        x: kanbanX,
+        y: kanbanCenterY,
+        color: pr.color || "#8b7bff",
+      },
+    });
+    itemsMap[kanbanNode.id] = kanbanNode;
+    touched.push(kanbanNode.id);
+  } else if (!kanbanNode.canvas) {
+    kanbanNode.canvas = {
+      x: kanbanX,
+      y: kanbanCenterY,
+      color: pr.color || "#8b7bff",
+    };
+    touched.push(kanbanNode.id);
+  }
+
+  const baseKanbanX = kanbanNode.canvas?.x ?? kanbanX;
+  const baseKanbanY = kanbanNode.canvas?.y ?? kanbanCenterY;
+  const statusX = baseKanbanX + 260;
+
+  for (let idx = 0; idx < KANBAN_STATUS_NODES.length; idx++) {
+    const def = KANBAN_STATUS_NODES[idx];
+    const existingStatusNode = Object.values(itemsMap).find(
+      (it) =>
+        it.parent_id === kanbanNode!.id &&
+        statusFromKanbanNodeTitle(it.title) === def.status
+    );
+    const statusY = Math.round(baseKanbanY + (idx - 1.5) * 86);
+    if (!existingStatusNode) {
+      const statusNode = newItem({
+        title: def.title,
+        icon: def.icon,
+        type: "MINDMAP_NODE",
+        parent_id: kanbanNode.id,
+        project_id: pr.id,
+        status: null,
+        sort_order: def.sort_order,
+        ...(userId ? { user_id: userId } : {}),
+        canvas: {
+          x: statusX,
+          y: statusY,
+          color: def.color,
+        },
+      });
+      itemsMap[statusNode.id] = statusNode;
+      touched.push(statusNode.id);
+    } else {
+      let updatedExisting = false;
+      if (!existingStatusNode.canvas) {
+        existingStatusNode.canvas = {
+          x: statusX,
+          y: statusY,
+          color: def.color,
+        };
+        updatedExisting = true;
+      }
+      // Atualiza retroativamente o nó antigo "Backlog" para "Brainstorming" (💡)
+      if (
+        def.status === "BACKLOG" &&
+        existingStatusNode.title.trim().toLowerCase().includes("backlog")
+      ) {
+        existingStatusNode.title = def.title;
+        existingStatusNode.icon = def.icon;
+        updatedExisting = true;
+      }
+      if (updatedExisting) {
+        touched.push(existingStatusNode.id);
+      }
+    }
+  }
+
+  return touched;
+}
+
 interface State {
   ready: boolean;
   repo: Repository | null;
   currentUserId: string | null;
   items: Record<string, ItemNode>;
+  trashedItems: Record<string, ItemNode>;
   projects: Record<string, Project>;
   shares: Record<string, ItemShare>;
   favorites: string[];
   drawerId: string | null;
   shareModalItemId: string | null;
+  trashModalOpen: boolean;
   theme: Theme;
   sync: SyncState;
   syncError: string | null;
@@ -28,7 +236,9 @@ interface State {
   todayTaskFilter: TodayTaskFilter;
 
   init(repo?: Repository): Promise<void>;
+  ensureProjectKanbanBranch(projectId: string): void;
   checkRecurringTasks(): number;
+  purgeExpiredTrash(): number;
   createItem(p: Partial<ItemNode>): ItemNode;
   addItems(newItems: ItemNode[]): Promise<void>;
   flushNow(): Promise<void>;
@@ -36,6 +246,9 @@ interface State {
   updateItem(id: string, patch: Partial<ItemNode>): void;
   updateItems(patches: { id: string; patch: Partial<ItemNode> }[]): void;
   deleteItem(id: string): void;
+  restoreItem(id: string): void;
+  permanentlyDeleteItem(id: string): void;
+  emptyTrash(): void;
   duplicateItem(id: string): ItemNode | null;
   moveItem(id: string, parentId: string | null): void;
   toggleLink(a: string, b: string): void;
@@ -48,6 +261,7 @@ interface State {
   toggleFavorite(id: string): void;
   openDrawer(id: string | null): void;
   openShareModal(id: string | null): void;
+  openTrashModal(open: boolean): void;
   upsertShareLocal(share: ItemShare): void;
   removeShareLocal(shareId: string): void;
   setTheme(t: Theme): void;
@@ -87,7 +301,7 @@ export const useStore = create<State>((set, get) => {
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    const { repo, items, projects } = get();
+    const { repo, items, trashedItems, projects } = get();
     if (!repo) return;
 
     const itemIds = [...pendingItems];
@@ -100,19 +314,20 @@ export const useStore = create<State>((set, get) => {
       return;
     }
 
-    const up = itemIds.map((id) => items[id]).filter(Boolean);
+    const up = itemIds.map((id) => items[id] ?? trashedItems[id]).filter(Boolean);
     const pUp = projIds.map((id) => projects[id]).filter(Boolean);
 
     set({ sync: "saving" });
 
     try {
       // Parents must exist before children (FK) — sort by depth.
+      const lookupItem = (id: string) => items[id] ?? trashedItems[id];
       const depth = (n: ItemNode) => {
         let d = 0;
         let p = n.parent_id;
-        while (p && items[p] && d < 100) {
+        while (p && lookupItem(p) && d < 100) {
           d++;
-          p = items[p].parent_id;
+          p = lookupItem(p)!.parent_id;
         }
         return d;
       };
@@ -177,10 +392,12 @@ export const useStore = create<State>((set, get) => {
     repo: null,
     currentUserId: null,
     items: {},
+    trashedItems: {},
     projects: {},
     shares: {},
     drawerId: null,
     shareModalItemId: null,
+    trashModalOpen: false,
     theme: "system",
     sync: "idle",
     syncError: null,
@@ -238,8 +455,29 @@ export const useStore = create<State>((set, get) => {
             window.localStorage.removeItem("nodes-flows:v1");
           }
 
-          // Garante que todo projeto tem uma única página raiz vinculada (idempotente) e limpa duplicatas geradas anteriormente
-          const itemsMap = Object.fromEntries(snap.items.map((i) => [i.id, i]));
+          // Separa itens ativos dos itens na lixeira (Soft Delete)
+          const itemsMap: Record<string, ItemNode> = {};
+          const trashedMap: Record<string, ItemNode> = {};
+          for (const i of snap.items) {
+            if (i.deleted_at) {
+              trashedMap[i.id] = i;
+            } else {
+              itemsMap[i.id] = i;
+            }
+          }
+          // Se um item ativo tiver parent_id apontando para um item na lixeira, move-o para a lixeira também
+          let trashPropagated = true;
+          while (trashPropagated) {
+            trashPropagated = false;
+            for (const it of Object.values(itemsMap)) {
+              if (it.parent_id && trashedMap[it.parent_id]) {
+                const parentTrashTime = trashedMap[it.parent_id].deleted_at;
+                trashedMap[it.id] = { ...it, deleted_at: parentTrashTime };
+                delete itemsMap[it.id];
+                trashPropagated = true;
+              }
+            }
+          }
           const projectsMap = Object.fromEntries(
             snap.projects.map((p) => [
               p.id,
@@ -322,6 +560,15 @@ export const useStore = create<State>((set, get) => {
                   duplicateProjectPageIdsToDelete.push(dup.id);
                 }
               }
+
+              // Migração Não-Destrutiva: garante que o projeto existente possua o ramo "📋 Kanban" e os 4 sub-nós de status sem mover nem apagar nós preexistentes
+              const kanbanTouched = injectKanbanBranchIntoMap(
+                itemsMap,
+                pr,
+                canonical,
+                snap.currentUserId
+              );
+              touchedItems.push(...kanbanTouched);
             } else if (!pr.page_id || !itemsMap[pr.page_id]) {
               const page = newItem({
                 title: pr.name,
@@ -334,6 +581,14 @@ export const useStore = create<State>((set, get) => {
               itemsMap[page.id] = page;
               pr.page_id = page.id;
               touchedItems.push(page.id);
+
+              const kanbanTouched = injectKanbanBranchIntoMap(
+                itemsMap,
+                pr,
+                page,
+                snap.currentUserId
+              );
+              touchedItems.push(...kanbanTouched);
             }
           }
 
@@ -359,11 +614,15 @@ export const useStore = create<State>((set, get) => {
             todayTaskFilter,
             favorites: favs,
             items: itemsMap,
+            trashedItems: trashedMap,
             projects: projectsMap,
             shares: sharesMap,
           });
 
           if (touchedItems.length > 0) touchItems(touchedItems);
+
+          // Expurga itens da lixeira que já ultrapassaram 7 dias de retenção
+          get().purgeExpiredTrash();
 
           // Executa verificação automática de tarefas recorrentes na hidratação inicial
           get().checkRecurringTasks();
@@ -373,6 +632,24 @@ export const useStore = create<State>((set, get) => {
       })();
 
       return initPromise;
+    },
+
+    ensureProjectKanbanBranch(projectId) {
+      const { items, projects, currentUserId } = get();
+      const pr = projects[projectId];
+      if (!pr) return;
+      const rootPage =
+        (pr.page_id && items[pr.page_id]) ||
+        Object.values(items).find(
+          (i) => i.project_id === projectId && i.type === "PAGE" && !i.parent_id
+        );
+      if (!rootPage) return;
+      const nextItems = { ...items };
+      const touched = injectKanbanBranchIntoMap(nextItems, pr, { ...rootPage }, currentUserId);
+      if (touched.length > 0) {
+        set({ items: nextItems });
+        touchItems(touched);
+      }
     },
 
     checkRecurringTasks() {
@@ -442,14 +719,75 @@ export const useStore = create<State>((set, get) => {
 
     createItem(p) {
       const state = get();
-      const siblings = Object.values(state.items).filter((i) => i.parent_id === (p.parent_id ?? null));
+      let resolvedParentId = p.parent_id ?? null;
+      let resolvedStatus = p.status ?? null;
+      let resolvedProjectId = p.project_id ?? null;
+      let resolvedCanvas = p.canvas ?? null;
+
+      // Se o pai for um dos nós de status do Kanban (ex: criado direto no mapa mental em "A Fazer"), herda o status automaticamente
+      if (resolvedParentId && state.items[resolvedParentId]) {
+        const parentNode = state.items[resolvedParentId];
+        const statusFromParent = getKanbanStatusForNode(state.items, resolvedParentId);
+        if (statusFromParent && !resolvedStatus) {
+          resolvedStatus = statusFromParent;
+        }
+        if (!resolvedProjectId && parentNode.project_id) {
+          resolvedProjectId = parentNode.project_id;
+        }
+      }
+
+      // Se foi criada pelo Kanban com um status e um projeto (e sem pai específico de outro ramo), vincula como filha do nó de status correspondente em "📋 Kanban"
+      if (resolvedStatus && resolvedProjectId) {
+        const proj = state.projects[resolvedProjectId];
+        const projRootId =
+          proj?.page_id ??
+          Object.values(state.items).find(
+            (i) => i.project_id === resolvedProjectId && i.type === "PAGE" && !i.parent_id
+          )?.id ??
+          null;
+
+        if (!resolvedParentId || resolvedParentId === projRootId) {
+          const statusNode = findProjectKanbanStatusNode(
+            state.items,
+            resolvedProjectId,
+            resolvedStatus,
+            projRootId
+          );
+          if (statusNode) {
+            resolvedParentId = statusNode.id;
+            if (!resolvedCanvas && statusNode.canvas) {
+              const statusChildren = Object.values(state.items).filter(
+                (i) => i.parent_id === statusNode.id && i.canvas
+              );
+              const baseX = (statusNode.canvas.x ?? 540) + 260;
+              const baseY =
+                statusChildren.length > 0
+                  ? Math.max(...statusChildren.map((c) => c.canvas?.y ?? 0)) + 68
+                  : statusNode.canvas.y ?? 0;
+              resolvedCanvas = {
+                x: baseX,
+                y: baseY,
+                color: statusNode.canvas.color ?? proj?.color ?? "#38bdf8",
+              };
+            }
+          }
+        }
+      }
+
+      const siblings = Object.values(state.items).filter((i) => i.parent_id === resolvedParentId);
       const maxOrder = siblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
       const inheritedUserId =
-        (p.parent_id && state.items[p.parent_id]?.user_id) || state.currentUserId || undefined;
+        (resolvedParentId && state.items[resolvedParentId]?.user_id) ||
+        state.currentUserId ||
+        undefined;
       const it = newItem({
         sort_order: maxOrder + 1,
         ...(inheritedUserId ? { user_id: inheritedUserId } : {}),
         ...p,
+        parent_id: resolvedParentId,
+        status: resolvedStatus,
+        project_id: resolvedProjectId,
+        canvas: resolvedCanvas,
       });
       set((s) => ({ items: { ...s.items, [it.id]: it } }));
       touchItems([it.id]);
@@ -487,15 +825,84 @@ export const useStore = create<State>((set, get) => {
       set((s) => {
         const items = { ...s.items };
         for (const { id, patch } of patches) {
-          if (!items[id]) continue;
-          items[id] = { ...items[id], ...patch, updated_at: t };
-          if (patch.title) {
+          const cur = items[id];
+          if (!cur) continue;
+          const nextPatch: Partial<ItemNode> = { ...patch };
+
+          // Sincronização Bidirecional Kanban -> Mapa Mental:
+          // Se a tarefa é filha de um dos nós de status do Kanban ("Backlog", "A Fazer", "Fazendo", "Concluído")
+          // e seu status foi alterado no quadro Kanban (e parent_id não foi explicitamente passado no patch),
+          // move o parent_id automaticamente para o nó do novo status correspondente.
+          // Se pertencer a outro ramo do mapa (ideia/processo), mantém seu pai e posição intactos.
+          if (
+            nextPatch.status !== undefined &&
+            nextPatch.status !== null &&
+            nextPatch.status !== cur.status &&
+            nextPatch.parent_id === undefined &&
+            isChildOfKanbanStatusNode(items, cur)
+          ) {
+            const currentStatusParent = cur.parent_id ? items[cur.parent_id] : null;
+            const kanbanBranchId = currentStatusParent?.parent_id ?? null;
+            const targetProjectId =
+              nextPatch.project_id !== undefined ? nextPatch.project_id : cur.project_id;
+
+            let targetStatusNode: ItemNode | null = null;
+            // Se continuou no mesmo projeto e mesmo ramo Kanban, busca o irmão correspondente ao novo status
+            if (
+              kanbanBranchId &&
+              (nextPatch.project_id === undefined || nextPatch.project_id === cur.project_id)
+            ) {
+              targetStatusNode =
+                Object.values(items).find(
+                  (it) =>
+                    it.parent_id === kanbanBranchId &&
+                    statusFromKanbanNodeTitle(it.title) === nextPatch.status
+                ) ?? null;
+            }
+            // Fallback ou mudança de raia de projeto: busca pelo projeto de destino
+            if (!targetStatusNode && targetProjectId) {
+              const targetProj = s.projects[targetProjectId];
+              targetStatusNode = findProjectKanbanStatusNode(
+                items,
+                targetProjectId,
+                nextPatch.status,
+                targetProj?.page_id
+              );
+            }
+
+            if (targetStatusNode && targetStatusNode.id !== cur.parent_id) {
+              const targetSiblings = Object.values(items).filter(
+                (i) => i.parent_id === targetStatusNode!.id && i.id !== id
+              );
+              const maxOrder = targetSiblings.reduce((m, sib) => Math.max(m, sib.sort_order), -10);
+              nextPatch.parent_id = targetStatusNode.id;
+              nextPatch.sort_order = maxOrder + 10;
+
+              if (targetStatusNode.canvas) {
+                const placedSiblings = targetSiblings.filter((sib) => sib.canvas);
+                const nextX = (targetStatusNode.canvas.x ?? 540) + 260;
+                const nextY =
+                  placedSiblings.length > 0
+                    ? Math.max(...placedSiblings.map((sib) => sib.canvas?.y ?? 0)) + 68
+                    : targetStatusNode.canvas.y ?? 0;
+                nextPatch.canvas = {
+                  ...(cur.canvas ?? {}),
+                  x: nextX,
+                  y: nextY,
+                  color: targetStatusNode.canvas.color ?? cur.canvas?.color ?? null,
+                };
+              }
+            }
+          }
+
+          items[id] = { ...cur, ...nextPatch, updated_at: t };
+          if (nextPatch.title) {
             const it = items[id];
             const proj = Object.values(projects).find(
               (p) => p.page_id === id || (it && it.project_id === p.id && it.type === "PAGE" && !it.parent_id)
             );
-            if (proj && proj.name !== patch.title) {
-              projectUpdates.push({ id: proj.id, name: patch.title });
+            if (proj && proj.name !== nextPatch.title) {
+              projectUpdates.push({ id: proj.id, name: nextPatch.title });
             }
           }
         }
@@ -508,33 +915,173 @@ export const useStore = create<State>((set, get) => {
     },
 
     deleteItem(id) {
-      const { items } = get();
-      const toDelete = new Set<string>([id]);
+      const { items, trashedItems } = get();
+      if (!items[id]) return;
+      const nowIso = new Date().toISOString();
+      const toTrash = new Set<string>([id]);
       let grew = true;
       while (grew) {
         grew = false;
         for (const it of Object.values(items)) {
+          if (it.parent_id && toTrash.has(it.parent_id) && !toTrash.has(it.id)) {
+            toTrash.add(it.id);
+            grew = true;
+          }
+        }
+      }
+      const nextItems = { ...items };
+      const nextTrashed = { ...trashedItems };
+      toTrash.forEach((d) => {
+        const target = nextItems[d];
+        if (target) {
+          nextTrashed[d] = {
+            ...target,
+            deleted_at: nowIso,
+            updated_at: nowIso,
+            canvas: target.canvas
+              ? { ...target.canvas, deleted_at: nowIso }
+              : { x: 0, y: 0, deleted_at: nowIso },
+          };
+          delete nextItems[d];
+        }
+      });
+
+      set((s) => ({
+        items: nextItems,
+        trashedItems: nextTrashed,
+        drawerId: s.drawerId && toTrash.has(s.drawerId) ? null : s.drawerId,
+      }));
+      touchItems([...toTrash]);
+    },
+
+    restoreItem(id) {
+      const { items, trashedItems } = get();
+      const rootTarget = trashedItems[id];
+      if (!rootTarget) return;
+      const nowIso = new Date().toISOString();
+
+      const toRestore = new Set<string>([id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const it of Object.values(trashedItems)) {
+          if (it.parent_id && toRestore.has(it.parent_id) && !toRestore.has(it.id)) {
+            toRestore.add(it.id);
+            grew = true;
+          }
+        }
+      }
+
+      const nextItems = { ...items };
+      const nextTrashed = { ...trashedItems };
+
+      toRestore.forEach((rId) => {
+        const target = nextTrashed[rId];
+        if (!target) return;
+        // Se o pai deste nó raiz restaurado ainda estiver na lixeira ou não existir mais, restaura na raiz (parent_id = null)
+        const parentStillMissing =
+          rId === id && target.parent_id && !nextItems[target.parent_id] && !toRestore.has(target.parent_id);
+        let cleanedCanvas = target.canvas ? { ...target.canvas } : null;
+        if (cleanedCanvas && "deleted_at" in cleanedCanvas) {
+          delete cleanedCanvas.deleted_at;
+        }
+        nextItems[rId] = {
+          ...target,
+          parent_id: parentStillMissing ? null : target.parent_id,
+          deleted_at: null,
+          updated_at: nowIso,
+          canvas: cleanedCanvas,
+        };
+        delete nextTrashed[rId];
+      });
+
+      set({ items: nextItems, trashedItems: nextTrashed });
+      touchItems([...toRestore]);
+    },
+
+    permanentlyDeleteItem(id) {
+      const { items, trashedItems } = get();
+      const allKnown = { ...items, ...trashedItems };
+      if (!allKnown[id]) return;
+
+      const toDelete = new Set<string>([id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const it of Object.values(allKnown)) {
           if (it.parent_id && toDelete.has(it.parent_id) && !toDelete.has(it.id)) {
             toDelete.add(it.id);
             grew = true;
           }
         }
       }
-      const next = { ...items };
+
+      const nextItems = { ...items };
+      const nextTrashed = { ...trashedItems };
       const relinked: string[] = [];
-      toDelete.forEach((d) => delete next[d]);
-      for (const it of Object.values(next)) {
+
+      toDelete.forEach((d) => {
+        delete nextItems[d];
+        delete nextTrashed[d];
+      });
+
+      for (const it of Object.values(nextItems)) {
         if (it.links.some((l) => toDelete.has(l))) {
-          next[it.id] = { ...it, links: it.links.filter((l) => !toDelete.has(l)) };
+          nextItems[it.id] = { ...it, links: it.links.filter((l) => !toDelete.has(l)) };
           relinked.push(it.id);
         }
       }
-      set((s) => ({ items: next, drawerId: s.drawerId && toDelete.has(s.drawerId) ? null : s.drawerId }));
+
+      set((s) => ({
+        items: nextItems,
+        trashedItems: nextTrashed,
+        drawerId: s.drawerId && toDelete.has(s.drawerId) ? null : s.drawerId,
+      }));
+
       toDelete.forEach((d) => {
         pendingItems.delete(d);
         pendingItemDeletes.add(d);
       });
-      touchItems(relinked);
+      if (relinked.length > 0) touchItems(relinked);
+      else schedule();
+    },
+
+    emptyTrash() {
+      const { trashedItems } = get();
+      const ids = Object.keys(trashedItems);
+      if (ids.length === 0) return;
+      for (const id of ids) {
+        pendingItems.delete(id);
+        pendingItemDeletes.add(id);
+      }
+      set({ trashedItems: {} });
+      schedule();
+    },
+
+    purgeExpiredTrash() {
+      const { trashedItems } = get();
+      const nowMs = Date.now();
+      const expiredIds: string[] = [];
+
+      for (const it of Object.values(trashedItems)) {
+        if (!it.deleted_at) continue;
+        const deletedMs = new Date(it.deleted_at).getTime();
+        if (!Number.isNaN(deletedMs) && nowMs - deletedMs > TRASH_RETENTION_MS) {
+          expiredIds.push(it.id);
+        }
+      }
+
+      if (expiredIds.length === 0) return 0;
+
+      const nextTrashed = { ...trashedItems };
+      for (const id of expiredIds) {
+        delete nextTrashed[id];
+        pendingItems.delete(id);
+        pendingItemDeletes.add(id);
+      }
+      set({ trashedItems: nextTrashed });
+      schedule();
+      return expiredIds.length;
     },
 
     duplicateItem(id) {
@@ -559,7 +1106,14 @@ export const useStore = create<State>((set, get) => {
       }
       const siblings = Object.values(items).filter((i) => i.parent_id === parentId);
       const maxOrder = siblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
-      get().updateItem(id, { parent_id: parentId, sort_order: maxOrder + 1 });
+      const matchedStatus = getKanbanStatusForNode(items, parentId);
+      const targetParent = parentId ? items[parentId] : null;
+      get().updateItem(id, {
+        parent_id: parentId,
+        sort_order: maxOrder + 1,
+        ...(matchedStatus ? { status: matchedStatus } : {}),
+        ...(matchedStatus && targetParent?.project_id ? { project_id: targetParent.project_id } : {}),
+      });
     },
 
     toggleLink(a, b) {
@@ -610,6 +1164,8 @@ export const useStore = create<State>((set, get) => {
         return { projects: nextProjects };
       });
       pendingProjects.add(pr.id);
+      // Cria automaticamente o ramo "📋 Kanban" e os 4 sub-nós de status para o novo projeto
+      get().ensureProjectKanbanBranch(pr.id);
       schedule();
       return pr;
     },
@@ -714,6 +1270,13 @@ export const useStore = create<State>((set, get) => {
       set({ shareModalItemId: id });
     },
 
+    openTrashModal(open) {
+      if (open) {
+        get().purgeExpiredTrash();
+      }
+      set({ trashModalOpen: open });
+    },
+
     upsertShareLocal(share) {
       set((s) => ({
         shares: { ...s.shares, [share.id]: share },
@@ -766,13 +1329,28 @@ export const useStore = create<State>((set, get) => {
         if (c.kind === "delete" && c.id) {
           set((s) => {
             const items = { ...s.items };
+            const trashedItems = { ...s.trashedItems };
             delete items[c.id!];
-            return { items };
+            delete trashedItems[c.id!];
+            return { items, trashedItems };
           });
         } else if (c.record && !pendingItems.has(c.record.id)) {
           const r = c.record as ItemNode;
-          const cur = get().items[r.id];
-          if (!cur || cur.updated_at < r.updated_at) set((s) => ({ items: { ...s.items, [r.id]: r } }));
+          const cur = get().items[r.id] ?? get().trashedItems[r.id];
+          if (!cur || cur.updated_at < r.updated_at) {
+            set((s) => {
+              const items = { ...s.items };
+              const trashedItems = { ...s.trashedItems };
+              if (r.deleted_at) {
+                delete items[r.id];
+                trashedItems[r.id] = r;
+              } else {
+                delete trashedItems[r.id];
+                items[r.id] = r;
+              }
+              return { items, trashedItems };
+            });
+          }
         }
       } else if (c.table === "shares") {
         if (c.kind === "delete" && c.id) {

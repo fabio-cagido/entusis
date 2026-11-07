@@ -767,9 +767,9 @@ export default function PageEditor({ id, compact = false }: { id: string; compac
             <button
               id="delete-item"
               className="icon-btn icon-btn-danger"
-              title="Excluir (inclui sub-itens)"
+              title="Mover para a lixeira (inclui sub-itens)"
               onClick={() => {
-                if (!confirm("Excluir este item e todos os sub-itens?")) return;
+                if (!confirm("Mover este item e todos os sub-itens para a lixeira (retidos por 7 dias)?")) return;
                 const parent = item.parent_id;
                 deleteItem(item.id);
                 router.push(parent ? `/page/${parent}` : "/today");
@@ -810,7 +810,14 @@ export default function PageEditor({ id, compact = false }: { id: string; compac
 
       <Properties item={item} />
 
-      <RichEditor key={item.id} value={item.content} compact={compact} onChange={(html) => updateItem(item.id, { content: html })} />
+      <RichEditor
+        key={item.id}
+        itemId={item.id}
+        title={item.title}
+        value={item.content}
+        compact={compact}
+        onChange={(html) => updateItem(item.id, { content: html })}
+      />
 
       <div className={compact ? "panels" : "panels panels-grid"}>
         <Children item={item} compact={compact} />

@@ -39,6 +39,7 @@ import { childrenOf, useStore, viewHref } from "@/lib/store";
 import type { ItemNode, Project } from "@/lib/types";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import ShareMindMapModal from "./ShareMindMapModal";
+import TrashModal from "./TrashModal";
 
 const DRAG_MIME = "application/x-nodes-flows-id";
 
@@ -156,7 +157,7 @@ function NotionActionMenu({
       }
     } else {
       deleteItem(target.id);
-      onShowToast("Página movida para a lixeira");
+      onShowToast("Movido para a lixeira (retido por 7 dias)");
       if (pathname === `/page/${target.id}` || pathname === `/canvas/${target.id}`) {
         router.push("/today");
       }
@@ -790,6 +791,8 @@ function ThemeToggle() {
 
 export default function Sidebar() {
   const items = useStore((s) => s.items);
+  const trashedItems = useStore((s) => s.trashedItems);
+  const openTrashModal = useStore((s) => s.openTrashModal);
   const favorites = useStore((s) => s.favorites);
   const repo = useStore((s) => s.repo);
   const sync = useStore((s) => s.sync);
@@ -1053,6 +1056,23 @@ export default function Sidebar() {
             </ul>
           </section>
         )}
+
+        <section className="side-section" style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            id="nav-trash"
+            className="side-nav-item"
+            style={{ width: "100%", border: "none", background: "transparent", cursor: "pointer", textAlign: "left" }}
+            onClick={() => openTrashModal(true)}
+            title="Abrir lixeira (itens retidos por 7 dias)"
+          >
+            <Trash2 size={15} />
+            <span className="side-nav-label">Lixeira</span>
+            {Object.keys(trashedItems).length > 0 && (
+              <span className="count-pill">{Object.keys(trashedItems).length}</span>
+            )}
+          </button>
+        </section>
       </div>
 
       <footer className="side-footer">
@@ -1142,6 +1162,9 @@ export default function Sidebar() {
 
       {/* Modal de Compartilhamento por E-mail */}
       <ShareMindMapModal />
+
+      {/* Modal de Lixeira (Soft Delete com retenção de 7 dias) */}
+      <TrashModal />
     </>
   );
 }

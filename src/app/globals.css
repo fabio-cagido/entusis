@@ -4037,6 +4037,190 @@ li[data-type="taskItem"] > div {
   opacity: 1;
 }
 
+/* ==========================================================================
+   Multi-Page A4 Document Editor & Print / PDF Styles
+   ========================================================================== */
+
+.doc-editor-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.doc-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-elevated);
+  flex-wrap: wrap;
+}
+
+.doc-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.doc-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-page-indicator {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle, var(--border));
+  user-select: none;
+}
+
+.doc-page-indicator strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.rich-a4-container {
+  background: var(--bg-app, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.doc-canvas-backdrop {
+  padding: 28px 20px 36px;
+  background: rgba(15, 23, 42, 0.04);
+}
+
+:root[data-theme="dark"] .doc-canvas-backdrop {
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.document-page-sheet {
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+  min-height: 1050px;
+  padding: 48px 52px 36px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+}
+
+.document-page-sheet.is-compact {
+  min-height: 420px;
+  padding: 24px 24px 20px;
+  box-shadow: none;
+  border: none;
+}
+
+.prose-a4 {
+  padding: 0;
+  min-height: 920px;
+  outline: none;
+  font-size: 0.98rem;
+  line-height: 1.75;
+}
+
+.document-page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+  margin-top: 24px;
+  border-top: 1px solid var(--border-subtle, var(--border));
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.prose img.doc-inline-image,
+.doc-inline-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 14px auto;
+  border: 1px solid var(--border-subtle, var(--border));
+  box-shadow: var(--shadow-sm);
+}
+
+.prose img.ProseMirror-selectednode {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Container exclusivo de impressão permanece oculto na tela normal */
+.doc-print-all-pages {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .doc-print-all-pages,
+  .doc-print-all-pages * {
+    visibility: visible;
+  }
+
+  .doc-print-all-pages {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  .document-page-sheet.document-page-print-sheet {
+    position: relative;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 100%;
+    min-height: auto;
+    padding: 0;
+    margin: 0 0 24px 0;
+    border: none;
+    box-shadow: none;
+    background: #ffffff !important;
+    color: #111827 !important;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .document-page-sheet.document-page-print-sheet:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .document-print-main-title {
+    font-size: 1.75rem;
+    font-weight: 800;
+    margin: 0 0 18px 0;
+    color: #111827 !important;
+  }
+}
+
+
 
 
 

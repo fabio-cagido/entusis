@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Columns2, FileText, KanbanSquare, Layers, X } from "lucide-react";
+import { Columns2, FileText, KanbanSquare, Layers, Network, X } from "lucide-react";
 import { descendantsOf, useStore } from "@/lib/store";
 import { STATUSES } from "@/lib/types";
 import KanbanBoard, { type Lane } from "./KanbanBoard";
@@ -123,7 +123,7 @@ export default function BoardView() {
         </div>
 
         <div className="view-head-actions">
-          {/* Alternador de Visões do Projeto: Página x Kanban x Ambos */}
+          {/* Alternador de Visões do Projeto: Página x Mapa x Kanban x Ambos */}
           {project && projectPage && (
             <div className="segmented segmented-sm">
               <button
@@ -133,6 +133,13 @@ export default function BoardView() {
               >
                 <FileText size={13} />
                 <span>Página</span>
+              </button>
+              <button
+                onClick={() => router.push(`/canvas/${projectPage.id}`)}
+                title="Abrir Mapa Mental do Projeto"
+              >
+                <Network size={13} />
+                <span>Mapa</span>
               </button>
               <button
                 className={projectTab === "kanban" ? "is-active" : ""}

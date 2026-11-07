@@ -19,6 +19,7 @@ interface ItemRow {
   recurrence_day_of_month?: number | null;
   recurrence_day_of_week?: number | null;
   last_recurred_at?: string | null;
+  deleted_at?: string | null;
   start_time: string | null;
   end_time: string | null;
   google_event_id: string | null;
@@ -61,8 +62,9 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
       ? Math.trunc(n.recurrence_day_of_week)
       : null;
   const lastRecurredAt = n.last_recurred_at || null;
+  const deletedAt = n.deleted_at || null;
 
-  // Store recurrence metadata inside canvas JSONB as well so it works seamlessly even before SQL migration 0003 is run.
+  // Store recurrence and soft-delete metadata inside canvas JSONB as well so it works seamlessly even before SQL migrations 0003/0005 are run.
   let canvasPayload: ItemNode["canvas"] = n.canvas ? { ...n.canvas } : null;
   if (isRecurring || lastRecurredAt) {
     canvasPayload = {
@@ -79,6 +81,18 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     };
   } else if (canvasPayload?.recurrence) {
     const { recurrence: _removed, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
+  if (deletedAt) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      deleted_at: deletedAt,
+    };
+  } else if (canvasPayload?.deleted_at) {
+    const { deleted_at: _removedDel, ...restCanvas } = canvasPayload;
     canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
   }
 
@@ -111,6 +125,7 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     baseRow.recurrence_day_of_month = recurrenceDayOfMonth;
     baseRow.recurrence_day_of_week = recurrenceDayOfWeek;
     baseRow.last_recurred_at = lastRecurredAt;
+    baseRow.deleted_at = deletedAt;
   }
 
   return baseRow;
@@ -126,6 +141,7 @@ const fromRow = (r: ItemRow): ItemNode => {
   const recurrenceDayOfWeek =
     r.recurrence_day_of_week ?? recMeta?.recurrence_day_of_week ?? null;
   const lastRecurredAt = r.last_recurred_at ?? recMeta?.last_recurred_at ?? null;
+  const deletedAt = r.deleted_at ?? r.canvas?.deleted_at ?? null;
 
   return {
     id: r.id,
@@ -143,6 +159,7 @@ const fromRow = (r: ItemRow): ItemNode => {
     recurrence_day_of_month: recurrenceDayOfMonth,
     recurrence_day_of_week: recurrenceDayOfWeek,
     last_recurred_at: lastRecurredAt,
+    deleted_at: deletedAt,
     schedule: {
       start_time: r.start_time,
       end_time: r.end_time,

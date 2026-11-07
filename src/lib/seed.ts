@@ -21,6 +21,7 @@ function item(p: Partial<ItemNode> & Pick<ItemNode, "title">): ItemNode {
     recurrence_day_of_month: null,
     recurrence_day_of_week: null,
     last_recurred_at: null,
+    deleted_at: null,
     schedule: emptySchedule(),
     attachments: [],
     links: [],
@@ -45,7 +46,7 @@ export function buildSeed(): { items: ItemNode[]; projects: Project[] } {
     sort_order: 0,
     content:
       "<h2>Tudo é um nó</h2><p>Páginas, tarefas, eventos e ramos de mapa mental compartilham a mesma base. " +
-      "Alterne entre <strong>Página</strong>, <strong>Canvas</strong> e <strong>Kanban</strong> no topo de qualquer item.</p>" +
+      "Alterne entre <strong>Página</strong>, <strong>Mapa</strong> e <strong>Kanban</strong> no topo de qualquer item.</p>" +
       '<ul data-type="taskList"><li data-type="taskItem" data-checked="true"><p>Explorar o dashboard Hoje</p></li>' +
       '<li data-type="taskItem" data-checked="false"><p>Abrir o mapa mental de exemplo</p></li>' +
       '<li data-type="taskItem" data-checked="false"><p>Criar sua primeira subpágina</p></li></ul>',

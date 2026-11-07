@@ -40,13 +40,13 @@ export default function NodeDrawer() {
                 <Maximize2 size={13} /> Abrir página
               </Link>
               <Link className="btn btn-ghost btn-xs" href={`/canvas/${drawerId}`} id="drawer-open-canvas">
-                <Network size={13} /> Como canvas
+                <Network size={13} /> Como mapa
               </Link>
               <span className="spacer" />
               <button
                 className="icon-btn icon-btn-danger"
-                title="Excluir"
-                onClick={() => confirm("Excluir este item e todos os sub-itens?") && deleteItem(drawerId)}
+                title="Mover para a lixeira"
+                onClick={() => confirm("Mover este item e seus sub-itens para a lixeira (retidos por 7 dias)?") && deleteItem(drawerId)}
               >
                 <Trash2 size={15} />
               </button>
