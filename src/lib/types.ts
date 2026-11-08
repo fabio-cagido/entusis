@@ -66,6 +66,31 @@ export interface RecurrenceMeta {
   last_recurred_at?: string | null;
 }
 
+export interface SubmapNodeItem {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  shape?: ProcessShape;
+  color?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface SubmapEdgeItem {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  label?: string;
+}
+
+export interface SubmapCanvasData {
+  nodes: SubmapNodeItem[];
+  edges: SubmapEdgeItem[];
+}
+
 export interface CanvasMeta {
   x: number;
   y: number;
@@ -78,6 +103,8 @@ export interface CanvasMeta {
   completed_at?: string | null;
   attendees?: string[] | null;
   google_event_link?: string | null;
+  submap_canvas_data?: SubmapCanvasData | null;
+  scope_node_id?: string | null;
 }
 
 export interface ItemNode {
@@ -90,6 +117,8 @@ export interface ItemNode {
   type: ItemType;
   parent_id: string | null;
   project_id: string | null;
+  /** Nullable scope node ID: NULL for root project map nodes, or the parent submap's node ID for isolated submap nodes. */
+  scope_node_id?: string | null;
   /** null = not tracked on Kanban. Any non-null status makes the item a Kanban card. */
   status: Status | null;
   /** Pinned to the "To Do Today" dashboard. */
@@ -104,6 +133,8 @@ export interface ItemNode {
   deleted_at?: string | null;
   /** Completion timestamp (ISO). Populated only on status transition to DONE going forward. */
   completed_at?: string | null;
+  /** Isolated internal diagram/submap canvas data ("Como mapa") for this node. */
+  submap_canvas_data?: SubmapCanvasData | null;
   schedule: Schedule;
   /** List of participant / attendee email addresses. */
   attendees?: string[];

@@ -1091,7 +1091,11 @@ export const useStore = create<State>((set, get) => {
       while (grew) {
         grew = false;
         for (const it of Object.values(items)) {
-          if (it.parent_id && toTrash.has(it.parent_id) && !toTrash.has(it.id)) {
+          if (
+            ((it.parent_id && toTrash.has(it.parent_id)) ||
+              (it.scope_node_id && toTrash.has(it.scope_node_id))) &&
+            !toTrash.has(it.id)
+          ) {
             toTrash.add(it.id);
             grew = true;
           }
@@ -1133,7 +1137,11 @@ export const useStore = create<State>((set, get) => {
       while (grew) {
         grew = false;
         for (const it of Object.values(trashedItems)) {
-          if (it.parent_id && toRestore.has(it.parent_id) && !toRestore.has(it.id)) {
+          if (
+            ((it.parent_id && toRestore.has(it.parent_id)) ||
+              (it.scope_node_id && toRestore.has(it.scope_node_id))) &&
+            !toRestore.has(it.id)
+          ) {
             toRestore.add(it.id);
             grew = true;
           }
@@ -1177,7 +1185,11 @@ export const useStore = create<State>((set, get) => {
       while (grew) {
         grew = false;
         for (const it of Object.values(allKnown)) {
-          if (it.parent_id && toDelete.has(it.parent_id) && !toDelete.has(it.id)) {
+          if (
+            ((it.parent_id && toDelete.has(it.parent_id)) ||
+              (it.scope_node_id && toDelete.has(it.scope_node_id))) &&
+            !toDelete.has(it.id)
+          ) {
             toDelete.add(it.id);
             grew = true;
           }

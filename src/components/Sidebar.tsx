@@ -918,7 +918,7 @@ export default function Sidebar() {
                 className="brand-logo"
                 priority
               />
-              <span className="brand-name">ayolia</span>
+              <span className="brand-name">Ayolia</span>
             </Link>
             <button
               type="button"

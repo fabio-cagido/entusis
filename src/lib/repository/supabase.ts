@@ -12,6 +12,7 @@ interface ItemRow {
   type: ItemNode["type"];
   parent_id: string | null;
   project_id: string | null;
+  scope_node_id?: string | null;
   status: ItemNode["status"];
   is_today: boolean;
   is_recurring?: boolean;
@@ -21,6 +22,7 @@ interface ItemRow {
   last_recurred_at?: string | null;
   deleted_at?: string | null;
   completed_at?: string | null;
+  submap_canvas_data?: ItemNode["submap_canvas_data"];
   start_time: string | null;
   end_time: string | null;
   google_event_id: string | null;
@@ -71,6 +73,16 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     ? n.attendees.map((e) => String(e).trim()).filter(Boolean)
     : [];
   const googleEventLink = n.schedule?.google_event_link || null;
+  const submapCanvasData =
+    n.submap_canvas_data &&
+    Array.isArray(n.submap_canvas_data.nodes) &&
+    (n.submap_canvas_data.nodes.length > 0 || (n.submap_canvas_data.edges?.length ?? 0) > 0)
+      ? {
+          nodes: n.submap_canvas_data.nodes,
+          edges: Array.isArray(n.submap_canvas_data.edges) ? n.submap_canvas_data.edges : [],
+        }
+      : null;
+  const scopeNodeId = n.scope_node_id && UUID_RE.test(n.scope_node_id) ? n.scope_node_id : null;
 
   // Store recurrence, soft-delete, and attendees metadata inside canvas JSONB as well so it works seamlessly even before SQL migrations 0003/0005/0006 are run.
   let canvasPayload: ItemNode["canvas"] = n.canvas ? { ...n.canvas } : null;
@@ -140,6 +152,30 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
   }
 
+  if (submapCanvasData) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      submap_canvas_data: submapCanvasData,
+    };
+  } else if (canvasPayload?.submap_canvas_data) {
+    const { submap_canvas_data: _removedSubmap, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
+  if (scopeNodeId) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      scope_node_id: scopeNodeId,
+    };
+  } else if (canvasPayload?.scope_node_id) {
+    const { scope_node_id: _removedScope, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
   const baseRow: ItemRow = {
     id: n.id,
     user_id: n.user_id && UUID_RE.test(n.user_id) ? n.user_id : userId,
@@ -173,6 +209,8 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     baseRow.completed_at = completedAt;
     baseRow.attendees = attendeesList;
     baseRow.google_event_link = googleEventLink;
+    baseRow.submap_canvas_data = submapCanvasData;
+    baseRow.scope_node_id = scopeNodeId;
   }
 
   return baseRow;
@@ -197,6 +235,8 @@ const fromRow = (r: ItemRow): ItemNode => {
       ? r.canvas!.attendees!
       : [];
   const googleEventLink = r.google_event_link ?? r.canvas?.google_event_link ?? null;
+  const submapCanvasData = r.submap_canvas_data ?? r.canvas?.submap_canvas_data ?? null;
+  const scopeNodeId = r.scope_node_id ?? r.canvas?.scope_node_id ?? null;
 
   return {
     id: r.id,
@@ -207,6 +247,7 @@ const fromRow = (r: ItemRow): ItemNode => {
     type: r.type,
     parent_id: r.parent_id,
     project_id: r.project_id,
+    scope_node_id: scopeNodeId,
     status: r.status,
     is_today: !!r.is_today,
     is_recurring: isRecurring,
@@ -216,6 +257,7 @@ const fromRow = (r: ItemRow): ItemNode => {
     last_recurred_at: lastRecurredAt,
     deleted_at: deletedAt,
     completed_at: completedAt,
+    submap_canvas_data: submapCanvasData,
     schedule: {
       start_time: r.start_time,
       end_time: r.end_time,

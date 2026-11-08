@@ -5,8 +5,16 @@ import Sidebar from "@/components/Sidebar";
 import NodeDrawer from "@/components/NodeDrawer";
 
 export const metadata: Metadata = {
-  title: "ayolia — Plataforma Integrada de Produtividade",
-  description: "Notion + Miro + Google Calendar em uma única base unificada de dados.",
+  title: {
+    default: "Ayolia — Plataforma Integrada de Produtividade",
+    template: "%s | Ayolia",
+  },
+  description: "Ayolia — Notion + Miro + Google Calendar em uma única base unificada de dados.",
+  openGraph: {
+    title: "Ayolia — Plataforma Integrada de Produtividade",
+    description: "Páginas, mapas mentais, quadros Kanban e agenda em uma única base unificada.",
+    siteName: "Ayolia",
+  },
   icons: {
     icon: [
       { url: "/favicon.ico" },

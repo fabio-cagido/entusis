@@ -4821,6 +4821,29 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   border-color: #065f46 !important;
 }
 
+/* Destaque temporário (pulso âmbar) no nó de origem ao retornar de um submapa */
+@keyframes submapReturnPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75), 0 0 24px rgba(245, 158, 11, 0.55);
+    border-color: #f59e0b;
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(245, 158, 11, 0), 0 0 32px rgba(245, 158, 11, 0.7);
+    border-color: #fbbf24;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0), 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+.mind-node.is-return-highlight,
+.process-node.is-return-highlight {
+  border-color: #f59e0b !important;
+  animation: submapReturnPulse 1.8s ease-out forwards;
+  z-index: 30;
+}
+
+
 
 
 

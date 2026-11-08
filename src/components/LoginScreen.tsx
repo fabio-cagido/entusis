@@ -109,7 +109,7 @@ export default function LoginScreen() {
           className="brand-logo brand-logo--lg"
           priority
         />
-        <h1>ayolia</h1>
+        <h1>Ayolia</h1>
         <p className="muted">Páginas, mapas mentais e agenda em uma única base.</p>
 
         <button id="login-google" className="btn btn-primary btn-block" onClick={handleGoogle}>

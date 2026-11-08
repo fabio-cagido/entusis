@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
@@ -26,6 +27,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
+  ArrowLeft,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
@@ -75,10 +77,12 @@ type MindData = {
   isRoot: boolean;
   editing: boolean;
   childCount: number;
+  submapCount?: number;
   collapsed: boolean;
   side: 1 | -1;
   isDragging?: boolean;
   isDropTarget?: boolean;
+  isReturnHighlight?: boolean;
 };
 type MindNode = Node<MindData, "mind">;
 
@@ -89,6 +93,8 @@ type ProcessData = {
   editing: boolean;
   width: number;
   height: number;
+  submapCount?: number;
+  isReturnHighlight?: boolean;
 };
 type ProcessNode = Node<ProcessData, "process">;
 
@@ -124,7 +130,7 @@ const MindCtx = createContext<Ctx | null>(null);
 
 const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<MindNode>) {
   const ctx = useContext(MindCtx)!;
-  const { item, color, isRoot, editing, childCount, collapsed, side, isDragging, isDropTarget } = data;
+  const { item, color, isRoot, editing, childCount, submapCount = 0, collapsed, side, isDragging, isDropTarget, isReturnHighlight } = data;
   const [draft, setDraft] = useState(item.title);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -197,7 +203,7 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
   return (
     <div
       ref={nodeRef}
-      className={`mind-node ${isRoot ? "is-root" : ""} ${selected ? "is-selected" : ""} ${item.status === "DONE" ? "is-done" : ""} ${isDragging ? "is-dragging" : ""} ${isDropTarget ? "is-drop-target" : ""}`}
+      className={`mind-node ${isRoot ? "is-root" : ""} ${selected ? "is-selected" : ""} ${item.status === "DONE" ? "is-done" : ""} ${isDragging ? "is-dragging" : ""} ${isDropTarget ? "is-drop-target" : ""} ${isReturnHighlight ? "is-return-highlight" : ""}`}
       style={{ ["--node" as string]: color }}
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -328,6 +334,20 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
             <span>Criar Subpágina Vinculada</span>
           </button>
 
+          {!isRoot && (
+            <Link
+              href={`/canvas/${item.id}`}
+              className="notion-menu-item"
+              style={{ textDecoration: "none", color: "inherit" }}
+              onClick={() => setMenuOpen(false)}
+            >
+              <span className="notion-menu-icon">
+                <Workflow size={14} />
+              </span>
+              <span>Abrir Submapa (Como mapa)</span>
+            </Link>
+          )}
+
           <button
             className="notion-menu-item"
             onClick={() => {
@@ -358,12 +378,33 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
         </div>
       )}
 
-      {(item.type === "PAGE" || item.status || item.schedule.start_time || item.attachments.length > 0 || item.links.length > 0) && (
+      {(item.type === "PAGE" ||
+        item.status ||
+        item.schedule.start_time ||
+        item.attachments.length > 0 ||
+        item.links.length > 0 ||
+        submapCount > 0) && (
         <div className="mind-badges">
           {item.type === "PAGE" && (
             <span className="mind-page-badge" title="Este nó é uma página completa">
               <FileText size={10} /> Página
             </span>
+          )}
+          {submapCount > 0 && (
+            <Link
+              href={`/canvas/${item.id}`}
+              className="meta-chip nodrag"
+              style={{
+                textDecoration: "none",
+                background: "rgba(124, 92, 255, 0.14)",
+                color: "#a78bfa",
+                borderColor: "rgba(124, 92, 255, 0.3)",
+              }}
+              title={`Submapa interno (${submapCount} item(ns)) — clique para abrir`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Workflow size={10} /> {submapCount}
+            </Link>
           )}
           {item.status && <span className={`status-pill status-${item.status}`}>{STATUS_LABEL[item.status]}</span>}
           {item.schedule.start_time && (
@@ -407,7 +448,7 @@ const MindNodeView = memo(function MindNodeView({ data, selected }: NodeProps<Mi
 
 const ProcessNodeView = memo(function ProcessNodeView({ data, selected }: NodeProps<ProcessNode>) {
   const ctx = useContext(MindCtx)!;
-  const { item, color, shape, editing, width, height } = data;
+  const { item, color, shape, editing, width, height, submapCount = 0, isReturnHighlight } = data;
   const [draft, setDraft] = useState(item.title);
   const [popoverAnchor, setPopoverAnchor] = useState<"right" | "bottom" | "left" | "top" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -478,7 +519,7 @@ const ProcessNodeView = memo(function ProcessNodeView({ data, selected }: NodePr
   return (
     <div
       ref={nodeRef}
-      className={`process-node shape-${shape} ${selected ? "is-selected" : ""}`}
+      className={`process-node shape-${shape} ${selected ? "is-selected" : ""} ${isReturnHighlight ? "is-return-highlight" : ""}`}
       style={{
         ["--node" as string]: color,
         width: width || (shape === "diamond" ? 140 : shape === "circle" ? 130 : 160),
@@ -677,8 +718,24 @@ const ProcessNodeView = memo(function ProcessNodeView({ data, selected }: NodePr
           <span className="process-title">{item.title || <em className="muted">{defaultPlaceholder}</em>}</span>
         )}
 
-        {(item.status || item.schedule?.start_time || (item.attachments?.length ?? 0) > 0) && (
+        {(item.status || item.schedule?.start_time || (item.attachments?.length ?? 0) > 0 || submapCount > 0) && (
           <div className="mind-badges" style={{ marginTop: 4, justifyContent: "center" }}>
+            {submapCount > 0 && (
+              <Link
+                href={`/canvas/${item.id}`}
+                className="meta-chip nodrag"
+                style={{
+                  textDecoration: "none",
+                  background: "rgba(124, 92, 255, 0.14)",
+                  color: "#a78bfa",
+                  borderColor: "rgba(124, 92, 255, 0.3)",
+                }}
+                title={`Submapa interno (${submapCount} item(ns)) — clique para abrir`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Workflow size={9} /> {submapCount}
+              </Link>
+            )}
             {item.status && <span className={`status-pill status-${item.status}`}>{STATUS_LABEL[item.status]}</span>}
             {item.schedule?.start_time && (
               <span className="meta-chip"><CalendarClock size={9} /> {formatWhen(item.schedule.start_time)}</span>
@@ -695,12 +752,45 @@ const ProcessNodeView = memo(function ProcessNodeView({ data, selected }: NodePr
 
 const nodeTypes = { mind: MindNodeView, process: ProcessNodeView };
 
+interface SavedMapState {
+  collapsedIds?: string[];
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+function getMapStateStorageKey(mapId: string): string {
+  return `ayolia_map_state_${mapId}`;
+}
+
+function loadSavedMapState(mapId: string): SavedMapState | null {
+  if (typeof window === "undefined" || !mapId) return null;
+  try {
+    const raw = localStorage.getItem(getMapStateStorageKey(mapId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedMapState;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveMapStatePatch(mapId: string, patch: Partial<SavedMapState>): void {
+  if (typeof window === "undefined" || !mapId) return;
+  try {
+    const prev = loadSavedMapState(mapId) ?? {};
+    const next: SavedMapState = { ...prev, ...patch };
+    localStorage.setItem(getMapStateStorageKey(mapId), JSON.stringify(next));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Canvas                                                              */
 /* ------------------------------------------------------------------ */
 
 function MindMapInner({ rootId }: { rootId: string }) {
   const items = useStore((s) => s.items);
+  const projects = useStore((s) => s.projects);
   const createItem = useStore((s) => s.createItem);
   const updateItem = useStore((s) => s.updateItem);
   const updateItems = useStore((s) => s.updateItems);
@@ -709,13 +799,24 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const openDrawer = useStore((s) => s.openDrawer);
   const ensureProjectKanbanBranch = useStore((s) => s.ensureProjectKanbanBranch);
   const rf = useReactFlow();
+  const searchParams = useSearchParams();
+  const focusNodeId = searchParams.get("focusNode");
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    const saved = loadSavedMapState(rootId);
+    return new Set(Array.isArray(saved?.collapsedIds) ? saved!.collapsedIds : []);
+  });
   const [nodes, setNodes] = useState<(MindNode | ProcessNode)[]>([]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [processMenuOpen, setProcessMenuOpen] = useState(false);
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
+  const handledFocusRef = useRef<string | null>(null);
+  const restoredViewportForMapRef = useRef<string | null>(null);
+  const latestViewportRef = useRef<{ x: number; y: number; zoom: number } | null>(null);
+  const editingIdRef = useRef<string | null>(null);
+  editingIdRef.current = editingId;
 
   /* ---- Cache de Dimensões Reais dos Nós ---- */
   const dimensionsRef = useRef<Map<string, NodeDimensions>>(new Map());
@@ -753,6 +854,79 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const shares = useStore((s) => s.shares);
   const currentUserId = useStore((s) => s.currentUserId);
 
+  /* ---- Isolamento de Escopo Recursivo (scope_node_id) ---- */
+  const isSubmap = Boolean(root && (root.parent_id !== null || root.scope_node_id != null));
+  const activeScopeId: string | null = isSubmap ? rootId : null;
+
+  const scopedItems = useMemo(() => {
+    if (!root) return {} as Record<string, ItemNode>;
+    const out: Record<string, ItemNode> = {
+      [rootId]: root,
+    };
+    for (const it of Object.values(items)) {
+      if (it.id === rootId) continue;
+      const itemScope = it.scope_node_id ?? null;
+      if (itemScope === activeScopeId) {
+        out[it.id] = it;
+      }
+    }
+    return out;
+  }, [items, root, rootId, activeScopeId]);
+
+  const submapNodeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const it of Object.values(items)) {
+      if (it.scope_node_id) {
+        counts[it.scope_node_id] = (counts[it.scope_node_id] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [items]);
+
+  /* ---- Trilha de Navegação (Breadcrumb) para Submapas Recursivos ---- */
+  const breadcrumbTrail = useMemo(() => {
+    if (!root || !isSubmap) return [] as { mapItem: ItemNode; label: string; focusNodeId: string }[];
+    const steps: { mapItem: ItemNode; label: string; focusNodeId: string }[] = [];
+    const visited = new Set<string>();
+    let curr: ItemNode | undefined = root;
+
+    while (curr && !visited.has(curr.id)) {
+      visited.add(curr.id);
+      if (curr.scope_node_id && items[curr.scope_node_id]) {
+        const parentScopeMap: ItemNode = items[curr.scope_node_id];
+        const projName =
+          !parentScopeMap.parent_id && !parentScopeMap.scope_node_id && parentScopeMap.project_id
+            ? projects[parentScopeMap.project_id]?.name
+            : null;
+        steps.unshift({
+          mapItem: parentScopeMap,
+          label: projName || parentScopeMap.title || "Mapa",
+          focusNodeId: curr.id,
+        });
+        curr = parentScopeMap;
+      } else if (curr.parent_id) {
+        let p: ItemNode | undefined = items[curr.parent_id];
+        const subGuard = new Set<string>();
+        while (p && p.parent_id && !p.scope_node_id && !subGuard.has(p.id)) {
+          subGuard.add(p.id);
+          p = items[p.parent_id];
+        }
+        if (p) {
+          const projName = p.project_id ? projects[p.project_id]?.name : null;
+          steps.unshift({
+            mapItem: p,
+            label: projName || p.title || "Mapa Principal",
+            focusNodeId: curr.id,
+          });
+        }
+        break;
+      } else {
+        break;
+      }
+    }
+    return steps;
+  }, [root, isSubmap, items, projects]);
+
   const rootShareCount = useMemo(
     () => Object.values(shares).filter((s) => s.item_id === rootId).length,
     [shares, rootId]
@@ -761,19 +935,20 @@ function MindMapInner({ rootId }: { rootId: string }) {
     root?.user_id && currentUserId && root.user_id !== currentUserId
   );
 
-  /* ---- scope: nós da árvore hierárquica (exclui formas de processo) ---- */
+  /* ---- scope: nós da árvore hierárquica (exclui formas de processo, exceto a raiz do submapa) ---- */
   const mindScope = useMemo(
-    () => (root ? [root, ...descendantsOf(items, rootId).filter((i) => !i.canvas?.shape)] : []),
-    [items, root, rootId],
+    () => (root ? [root, ...descendantsOf(scopedItems, rootId).filter((i) => !i.canvas?.shape)] : []),
+    [scopedItems, root, rootId],
   );
 
-  /* ---- formas de processo independentes vinculadas ao canvas ---- */
+  /* ---- formas de processo independentes vinculadas ao escopo atual do canvas ---- */
   const processScope = useMemo(() => {
-    return Object.values(items).filter((i) => {
-      if (!i.canvas?.shape) return false;
+    return Object.values(scopedItems).filter((i) => {
+      if (!i.canvas?.shape || i.id === rootId) return false;
+      if (isSubmap) return (i.scope_node_id ?? null) === rootId;
       return i.parent_id === rootId || (root?.project_id && i.project_id === root.project_id);
     });
-  }, [items, rootId, root?.project_id]);
+  }, [scopedItems, rootId, root?.project_id, isSubmap]);
 
   const visibleMind = useMemo(() => {
     const ids = new Set(mindScope.map((s) => s.id));
@@ -794,10 +969,49 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
   /* ---- garante ramo "📋 Kanban" em mapas de projetos existentes (não-destrutivo) ---- */
   useEffect(() => {
-    if (root?.project_id && !root.parent_id) {
+    if (root?.project_id && !root.parent_id && !root.scope_node_id) {
       ensureProjectKanbanBranch(root.project_id);
     }
-  }, [root?.id, root?.project_id, root?.parent_id, ensureProjectKanbanBranch]);
+  }, [root?.id, root?.project_id, root?.parent_id, root?.scope_node_id, ensureProjectKanbanBranch]);
+
+  /* ---- Restaura estado de nós recolhidos (collapsed) e câmera (viewport) ao abrir/trocar de mapa ---- */
+  useEffect(() => {
+    const saved = loadSavedMapState(rootId);
+    setCollapsed(new Set(Array.isArray(saved?.collapsedIds) ? saved!.collapsedIds : []));
+  }, [rootId]);
+
+  useEffect(() => {
+    if (!root || focusNodeId) return;
+    if (restoredViewportForMapRef.current === rootId) return;
+    if (nodes.length === 0) return;
+
+    restoredViewportForMapRef.current = rootId;
+    const saved = loadSavedMapState(rootId);
+    if (
+      saved?.viewport &&
+      typeof saved.viewport.x === "number" &&
+      typeof saved.viewport.y === "number" &&
+      typeof saved.viewport.zoom === "number"
+    ) {
+      latestViewportRef.current = saved.viewport;
+      rf.setViewport(saved.viewport, { duration: 0 });
+    } else if (root.canvas) {
+      const dim =
+        dimensionsRef.current.get(rootId) || estimateNodeSize(root, true);
+      const centerX = root.canvas.x + dim.width / 2;
+      const centerY = root.canvas.y + dim.height / 2;
+      rf.setCenter(centerX, centerY, { zoom: 0.95, duration: 0 });
+    }
+  }, [root, rootId, focusNodeId, nodes.length, rf]);
+
+  /* ---- Salva a câmera (viewport) no localStorage ao desmontar/sair do mapa ---- */
+  useEffect(() => {
+    return () => {
+      if (latestViewportRef.current) {
+        saveMapStatePatch(rootId, { viewport: latestViewportRef.current });
+      }
+    };
+  }, [rootId]);
 
   /* ---- first open: lay out only unplaced mind tree nodes without moving already-placed nodes ---- */
   useEffect(() => {
@@ -813,19 +1027,84 @@ function MindMapInner({ rootId }: { rootId: string }) {
     );
   }, [mindScope, root, rootId, collapsed, updateItems]);
 
+  /* ---- Centralização suave (setCenter) e destaque âmbar ao retornar de um submapa (?focusNode=...) ---- */
+  useEffect(() => {
+    if (!focusNodeId || !root) return;
+    const focusKey = `${rootId}:${focusNodeId}`;
+    if (handledFocusRef.current === focusKey) return;
+
+    const targetItem = scopedItems[focusNodeId] ?? items[focusNodeId];
+    if (!targetItem?.canvas) return;
+    if (!nodes.some((n) => n.id === focusNodeId)) return;
+
+    handledFocusRef.current = focusKey;
+
+    // Garante que nenhum ancestral do nó focado esteja recolhido
+    setCollapsed((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      let changed = false;
+      let p = targetItem.parent_id;
+      let guard = 0;
+      while (p && guard++ < 100) {
+        if (next.has(p)) {
+          next.delete(p);
+          changed = true;
+        }
+        if (p === rootId) break;
+        p = items[p]?.parent_id ?? null;
+      }
+      if (changed) {
+        saveMapStatePatch(rootId, { collapsedIds: Array.from(next) });
+      }
+      return changed ? next : prev;
+    });
+
+    const dim =
+      dimensionsRef.current.get(focusNodeId) ||
+      estimateNodeSize(targetItem, focusNodeId === rootId);
+    const centerX = targetItem.canvas.x + dim.width / 2;
+    const centerY = targetItem.canvas.y + dim.height / 2;
+
+    const centerTimer = setTimeout(() => {
+      rf.setCenter(centerX, centerY, { zoom: 1, duration: 600 });
+    }, 40);
+
+    setHighlightedNodeId(focusNodeId);
+    const clearHighlightTimer = setTimeout(() => {
+      setHighlightedNodeId((cur) => (cur === focusNodeId ? null : cur));
+    }, 2000);
+
+    return () => {
+      clearTimeout(centerTimer);
+      clearTimeout(clearHighlightTimer);
+    };
+  }, [focusNodeId, root, rootId, scopedItems, items, nodes, rf]);
+
   /* ---- Relayout dinâmico quando dimensões mudam (ex: texto multilinhas) ---- */
   const scheduleRelayout = useCallback(() => {
     if (relayoutTimerRef.current) clearTimeout(relayoutTimerRef.current);
     relayoutTimerRef.current = setTimeout(() => {
       const currentItems = useStore.getState().items;
-      const currentScope = currentItems[rootId]
-        ? [currentItems[rootId], ...descendantsOf(currentItems, rootId).filter((i) => !i.canvas?.shape)]
-        : [];
+      const rootNode = currentItems[rootId];
+      if (!rootNode) return;
+      const currentScoped: Record<string, ItemNode> = { [rootId]: rootNode };
+      for (const it of Object.values(currentItems)) {
+        if (it.id === rootId) continue;
+        if ((it.scope_node_id ?? null) === activeScopeId) {
+          currentScoped[it.id] = it;
+        }
+      }
+      const currentScope = [
+        rootNode,
+        ...descendantsOf(currentScoped, rootId).filter((i) => !i.canvas?.shape),
+      ];
       if (!currentScope.length) return;
 
       const pos = layoutTree(currentScope, rootId, collapsed, dimensionsRef.current);
       const patches: { id: string; patch: Partial<ItemNode> }[] = [];
       for (const [id, p] of Object.entries(pos)) {
+        if (isSubmap && id === rootId) continue;
         const cur = currentItems[id];
         if (cur?.canvas && (Math.abs(cur.canvas.x - p.x) > 1 || Math.abs(cur.canvas.y - p.y) > 1)) {
           patches.push({ id, patch: { canvas: { ...cur.canvas, x: p.x, y: p.y } } });
@@ -835,7 +1114,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         updateItems(patches);
       }
     }, 60);
-  }, [rootId, collapsed, updateItems]);
+  }, [rootId, activeScopeId, isSubmap, collapsed, updateItems]);
 
   /* ---- derived colors and child counts ---- */
   const colorOf = useCallback(
@@ -882,10 +1161,12 @@ function MindMapInner({ rootId }: { rootId: string }) {
             isRoot: it.id === rootId,
             editing: editingId === it.id,
             childCount: childCounts[it.id] ?? 0,
+            submapCount: (submapNodeCounts[it.id] ?? 0) + (it.submap_canvas_data?.nodes?.length ?? 0),
             collapsed: collapsed.has(it.id),
             side: it.canvas!.x < rootX ? -1 : 1,
             isDragging: activeDragId === it.id,
             isDropTarget: dropTargetId === it.id,
+            isReturnHighlight: highlightedNodeId === it.id,
           },
         }));
 
@@ -906,12 +1187,14 @@ function MindMapInner({ rootId }: { rootId: string }) {
             editing: editingId === it.id,
             width: it.canvas!.width || (it.canvas!.shape === "diamond" ? 140 : it.canvas!.shape === "circle" ? 130 : 160),
             height: it.canvas!.height || (it.canvas!.shape === "diamond" ? 100 : it.canvas!.shape === "circle" ? 70 : 80),
+            submapCount: (submapNodeCounts[it.id] ?? 0) + (it.submap_canvas_data?.nodes?.length ?? 0),
+            isReturnHighlight: highlightedNodeId === it.id,
           },
         }));
 
       return [...treeNodes, ...flowNodes];
     });
-  }, [visibleMind, processScope, colorOf, rootId, editingId, childCounts, collapsed, root?.canvas?.x, activeDragId, dropTargetId]);
+  }, [visibleMind, processScope, colorOf, rootId, editingId, childCounts, submapNodeCounts, collapsed, root?.canvas?.x, activeDragId, dropTargetId, highlightedNodeId]);
 
   /* ---- Edges (Curvas de Árvore + Conectores Direcionais de Processo) ---- */
   const edges = useMemo<Edge[]>(() => {
@@ -1042,14 +1325,14 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       if (node.id === rootId) {
         dragRef.current = null;
-        setActiveDragId(rootId);
+        if (!isSubmap) setActiveDragId(rootId);
         return;
       }
 
       if (!item.parent_id) return;
 
       // Trava anticiclo: o nó arrastado + toda sua árvore de descendentes diretos e indiretos
-      const descendantIds = descendantsOf(items, node.id).map((d) => d.id);
+      const descendantIds = descendantsOf(scopedItems, node.id).map((d) => d.id);
       const forbiddenIds = new Set<string>([node.id, ...descendantIds]);
 
       const rootX = root?.canvas?.x ?? 0;
@@ -1057,10 +1340,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       let siblings: ItemNode[];
       if (item.parent_id === rootId) {
-        const rootKids = Object.values(items).filter((i) => i.parent_id === rootId && i.canvas && !i.canvas.shape);
+        const rootKids = Object.values(scopedItems).filter((i) => i.parent_id === rootId && i.canvas && !i.canvas.shape);
         siblings = rootKids.filter((k) => (side === -1 ? k.canvas!.x < rootX : k.canvas!.x >= rootX));
       } else {
-        siblings = Object.values(items).filter((i) => i.parent_id === item.parent_id && i.canvas && !i.canvas.shape);
+        siblings = Object.values(scopedItems).filter((i) => i.parent_id === item.parent_id && i.canvas && !i.canvas.shape);
       }
       siblings.sort((a, b) => a.sort_order - b.sort_order);
 
@@ -1079,7 +1362,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       setActiveDragId(node.id);
     },
-    [items, rootId, root?.canvas?.x],
+    [items, scopedItems, isSubmap, rootId, root?.canvas?.x],
   );
 
   /* ---- Drag Move: Detecção de colisão para reparenting + linha guia em irmãos ---- */
@@ -1220,8 +1503,8 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const drag = dragRef.current;
       dragRef.current = null;
 
-      // Forma de processo: salva coordenadas livres no canvas
-      if (items[node.id]?.canvas?.shape) {
+      // Forma de processo: salva coordenadas livres no canvas (exceto se for a própria raiz de um submapa)
+      if (items[node.id]?.canvas?.shape && node.id !== rootId) {
         updateItem(node.id, {
           canvas: {
             ...(items[node.id]?.canvas ?? { x: 0, y: 0 }),
@@ -1233,12 +1516,13 @@ function MindMapInner({ rootId }: { rootId: string }) {
       }
 
       if (node.id === rootId) {
+        if (isSubmap) return;
         const dx = node.position.x - (root?.canvas?.x ?? 0);
         const dy = node.position.y - (root?.canvas?.y ?? 0);
         if (dx === 0 && dy === 0) return;
 
         const newRootCanvas = { ...(root?.canvas ?? { color: null }), x: node.position.x, y: node.position.y };
-        const updatedItems = { ...items, [rootId]: { ...root, canvas: newRootCanvas } };
+        const updatedItems = { ...scopedItems, [rootId]: { ...root, canvas: newRootCanvas } };
 
         const newPositions = layoutTree(updatedItems, rootId, collapsed, dimensionsRef.current);
         updateItems(
@@ -1260,22 +1544,23 @@ function MindMapInner({ rootId }: { rootId: string }) {
         targetParentId &&
         targetParentId !== node.id &&
         !drag.forbiddenIds.has(targetParentId) &&
-        items[targetParentId]
+        scopedItems[targetParentId]
       ) {
         const nextCollapsed = new Set(collapsed);
         if (nextCollapsed.has(targetParentId)) {
           nextCollapsed.delete(targetParentId);
           setCollapsed(nextCollapsed);
+          saveMapStatePatch(rootId, { collapsedIds: Array.from(nextCollapsed) });
         }
 
-        const targetSiblings = Object.values(items).filter(
+        const targetSiblings = Object.values(scopedItems).filter(
           (i) => i.parent_id === targetParentId && i.id !== node.id && !i.canvas?.shape,
         );
         const maxOrder = targetSiblings.reduce((m, s) => Math.max(m, s.sort_order), -10);
         const nextSortOrder = maxOrder + 10;
 
         const rootX = root?.canvas?.x ?? 0;
-        const targetItem = items[targetParentId];
+        const targetItem = scopedItems[targetParentId];
         const targetSideX =
           targetParentId === rootId
             ? node.position.x >= rootX
@@ -1285,10 +1570,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
         // Se o nó de destino for um dos 4 sub-nós de status do Kanban ("Backlog", "A Fazer", "Fazendo", "Concluído"),
         // atualiza imediatamente o campo status da tarefa para refletir no quadro Kanban.
-        const matchedKanbanStatus = getKanbanStatusForNode(items, targetParentId);
+        const matchedKanbanStatus = getKanbanStatusForNode(scopedItems, targetParentId);
 
         const updatedItems: Record<string, ItemNode> = {
-          ...items,
+          ...scopedItems,
           [node.id]: {
             ...draggedItem,
             parent_id: targetParentId,
@@ -1328,6 +1613,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         // Atualizar posições de todos os demais nós do mapa (incluindo os descendentes do nó movido)
         for (const [id, p] of Object.entries(newPositions)) {
           if (id === node.id) continue;
+          if (isSubmap && id === rootId) continue;
           const cur = items[id];
           if (!cur || !cur.canvas || cur.canvas.x !== p.x || cur.canvas.y !== p.y) {
             patches.push({
@@ -1351,7 +1637,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         ...others.slice(targetIdx),
       ];
 
-      const updatedItems = { ...items };
+      const updatedItems = { ...scopedItems };
       reordered.forEach((s, idx) => {
         updatedItems[s.id] = { ...updatedItems[s.id], sort_order: idx * 10 };
       });
@@ -1374,6 +1660,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       for (const [id, p] of Object.entries(newPositions)) {
         if (reorderedIds.has(id)) continue;
+        if (isSubmap && id === rootId) continue;
         const cur = items[id];
         if (!cur || !cur.canvas || cur.canvas.x !== p.x || cur.canvas.y !== p.y) {
           patches.push({
@@ -1387,7 +1674,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         updateItems(patches);
       }
     },
-    [dropIndicator, rootId, root, items, collapsed, updateItem, updateItems],
+    [dropIndicator, rootId, root, items, scopedItems, isSubmap, collapsed, updateItem, updateItems],
   );
 
   const onConnect = useCallback(
@@ -1412,7 +1699,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const parent = items[parentId];
       if (!parent) return;
       const rootX = root?.canvas?.x ?? 0;
-      const kids = Object.values(items).filter((i) => i.parent_id === parentId && !i.canvas?.shape);
+      const kids = Object.values(scopedItems).filter((i) => i.parent_id === parentId && !i.canvas?.shape);
 
       let dir: 1 | -1 = (parent.canvas?.x ?? 0) < rootX ? -1 : 1;
       if (parentId === rootId) {
@@ -1424,9 +1711,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       const n = createItem({
         parent_id: parentId,
+        scope_node_id: activeScopeId,
         type: "MINDMAP_NODE",
         title: "Novo ramo",
-        project_id: parent.project_id,
+        project_id: parent.project_id ?? root?.project_id ?? null,
         sort_order: maxOrder + 10,
         canvas: { x: (parent.canvas?.x ?? 0) + (DEFAULT_NODE_WIDTH + LEVEL_GAP_X) * dir, y: parent.canvas?.y ?? 0, color: null },
       });
@@ -1435,22 +1723,25 @@ function MindMapInner({ rootId }: { rootId: string }) {
       if (nextCollapsed.has(parentId)) {
         nextCollapsed.delete(parentId);
         setCollapsed(nextCollapsed);
+        saveMapStatePatch(rootId, { collapsedIds: Array.from(nextCollapsed) });
       }
 
-      const updatedItems = { ...items, [n.id]: n };
+      const updatedItems = { ...scopedItems, [n.id]: n };
       const newPositions = layoutTree(updatedItems, rootId, nextCollapsed, dimensionsRef.current);
 
       updateItems(
-        Object.entries(newPositions).map(([id, p]) => ({
-          id,
-          patch: { canvas: { ...(updatedItems[id]?.canvas ?? {}), ...p } },
-        })),
+        Object.entries(newPositions)
+          .filter(([id]) => !(isSubmap && id === rootId))
+          .map(([id, p]) => ({
+            id,
+            patch: { canvas: { ...(updatedItems[id]?.canvas ?? {}), ...p } },
+          })),
       );
 
       setEditingId(n.id);
       setTimeout(() => selectOnly(n.id), 0);
     },
-    [items, root, rootId, createItem, collapsed, updateItems, selectOnly],
+    [items, scopedItems, activeScopeId, isSubmap, root, rootId, createItem, collapsed, updateItems, selectOnly],
   );
 
   /* ---- addSibling (Irmão do Mapa): Insert sibling e run layoutTree ---- */
@@ -1462,7 +1753,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const parent = items[it.parent_id];
       if (!parent) return;
 
-      const siblings = Object.values(items)
+      const siblings = Object.values(scopedItems)
         .filter((i) => i.parent_id === it.parent_id && !i.canvas?.shape)
         .sort((a, b) => a.sort_order - b.sort_order);
 
@@ -1471,15 +1762,16 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       const n = createItem({
         parent_id: it.parent_id,
+        scope_node_id: activeScopeId,
         type: "MINDMAP_NODE",
         title: "Novo ramo",
-        project_id: it.project_id,
+        project_id: it.project_id ?? root?.project_id ?? null,
         sort_order: it.sort_order + 5,
         canvas: { x: it.canvas?.x ?? 0, y: (it.canvas?.y ?? 0) + DEFAULT_NODE_HEIGHT + MIN_GAP_Y, color: null },
       });
 
       const reordered = [...siblings.slice(0, insertIndex), n, ...siblings.slice(insertIndex)];
-      const updatedItems = { ...items, [n.id]: n };
+      const updatedItems = { ...scopedItems, [n.id]: n };
       reordered.forEach((s, idx) => {
         updatedItems[s.id] = { ...updatedItems[s.id], sort_order: idx * 10 };
       });
@@ -1488,6 +1780,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       const patches: { id: string; patch: Partial<ItemNode> }[] = [];
       reordered.forEach((s, idx) => {
+        if (isSubmap && s.id === rootId) return;
         patches.push({
           id: s.id,
           patch: {
@@ -1497,6 +1790,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         });
       });
       for (const [otherId, p] of Object.entries(newPositions)) {
+        if (isSubmap && otherId === rootId) continue;
         if (!reordered.some((s) => s.id === otherId)) {
           patches.push({
             id: otherId,
@@ -1509,7 +1803,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
       setEditingId(n.id);
       setTimeout(() => selectOnly(n.id), 0);
     },
-    [items, rootId, createItem, collapsed, updateItems, selectOnly],
+    [items, scopedItems, activeScopeId, isSubmap, root?.project_id, rootId, createItem, collapsed, updateItems, selectOnly],
   );
 
   /* ---- Adicionar Forma de Processo / Fluxograma ---- */
@@ -1533,6 +1827,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       const n = createItem({
         parent_id: rootId,
+        scope_node_id: activeScopeId,
         project_id: root?.project_id,
         type: "MINDMAP_NODE",
         title,
@@ -1549,7 +1844,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
       setEditingId(n.id);
       setTimeout(() => selectOnly(n.id), 0);
     },
-    [rf, rootId, root?.project_id, createItem, selectOnly],
+    [rf, rootId, activeScopeId, root?.project_id, createItem, selectOnly],
   );
 
   /* ---- Quick-Add: Instanciação e Conexão Automática a partir de Pontos de Ancoragem ---- */
@@ -1563,7 +1858,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const sourceH = sourceCanvas.height || (sourceCanvas.shape === "diamond" ? 100 : sourceCanvas.shape === "circle" ? 70 : 80);
 
       const targetW = shape === "diamond" ? 140 : shape === "circle" ? 130 : 160;
-      const targetH = shape === "diamond" ? 100 : shape === "circle" ? 70 : 80;
+      const targetH = shape === "diamond" ? 100 : shape === "circle" ? 80 : 80;
 
       const gap = 80;
       let spawnX = sourceCanvas.x + sourceW + gap;
@@ -1585,6 +1880,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       const newNode = createItem({
         parent_id: rootId,
+        scope_node_id: activeScopeId,
         project_id: root?.project_id,
         type: "MINDMAP_NODE",
         title,
@@ -1610,7 +1906,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
       setEditingId(newNode.id);
       setTimeout(() => selectOnly(newNode.id), 0);
     },
-    [items, rootId, root?.project_id, createItem, updateItem, selectOnly],
+    [items, rootId, activeScopeId, root?.project_id, createItem, updateItem, selectOnly],
   );
 
   const selectedIds = nodes.filter((n) => n.selected).map((n) => n.id);
@@ -1624,17 +1920,27 @@ function MindMapInner({ rootId }: { rootId: string }) {
     ids.forEach((id) => deleteItem(id));
 
     setTimeout(() => {
-      const remainingItems = { ...useStore.getState().items };
-      ids.forEach((id) => delete remainingItems[id]);
-      const pos = layoutTree(remainingItems, rootId, collapsed, dimensionsRef.current);
+      const allNow = useStore.getState().items;
+      const rootNode = allNow[rootId];
+      if (!rootNode) return;
+      const remainingScoped: Record<string, ItemNode> = { [rootId]: rootNode };
+      for (const it of Object.values(allNow)) {
+        if (it.id === rootId) continue;
+        if ((it.scope_node_id ?? null) === activeScopeId) {
+          remainingScoped[it.id] = it;
+        }
+      }
+      const pos = layoutTree(remainingScoped, rootId, collapsed, dimensionsRef.current);
       useStore.getState().updateItems(
-        Object.entries(pos).map(([nodeId, p]) => ({
-          id: nodeId,
-          patch: { canvas: { ...(remainingItems[nodeId]?.canvas ?? {}), ...p } },
-        })),
+        Object.entries(pos)
+          .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
+          .map(([nodeId, p]) => ({
+            id: nodeId,
+            patch: { canvas: { ...(remainingScoped[nodeId]?.canvas ?? {}), ...p } },
+          })),
       );
     }, 0);
-  }, [selectedIds, rootId, childCounts, deleteItem, collapsed]);
+  }, [selectedIds, rootId, activeScopeId, isSubmap, childCounts, deleteItem, collapsed]);
 
   const collapsibleParentIds = useMemo(() => {
     const nonRootParents = mindScope
@@ -1657,19 +1963,22 @@ function MindMapInner({ rootId }: { rootId: string }) {
         : new Set<string>();
 
     setCollapsed(nextCollapsed);
+    saveMapStatePatch(rootId, { collapsedIds: Array.from(nextCollapsed) });
 
     const pos = layoutTree(mindScope, rootId, nextCollapsed, dimensionsRef.current);
     updateItems(
-      Object.entries(pos).map(([id, p]) => ({
-        id,
-        patch: { canvas: { ...(items[id]?.canvas ?? {}), ...p } },
-      })),
+      Object.entries(pos)
+        .filter(([id]) => !(isSubmap && id === rootId))
+        .map(([id, p]) => ({
+          id,
+          patch: { canvas: { ...(items[id]?.canvas ?? {}), ...p } },
+        })),
     );
 
     setTimeout(() => {
       rf.fitView({ duration: 400, padding: 0.2 });
     }, 80);
-  }, [collapsibleParentIds, hasExpandedBranches, mindScope, rootId, items, updateItems, rf]);
+  }, [collapsibleParentIds, hasExpandedBranches, mindScope, rootId, isSubmap, items, updateItems, rf]);
 
   const setColor = (c: string) =>
     updateItems(selectedIds.map((id) => ({ id, patch: { canvas: { ...(items[id]?.canvas ?? { x: 0, y: 0 }), color: c } } })));
@@ -1716,7 +2025,9 @@ function MindMapInner({ rootId }: { rootId: string }) {
         const prev = dimensionsRef.current.get(id);
         if (!prev || Math.abs(prev.height - dim.height) > 2 || Math.abs(prev.width - dim.width) > 2) {
           dimensionsRef.current.set(id, dim);
-          scheduleRelayout();
+          if (editingIdRef.current) {
+            scheduleRelayout();
+          }
         }
       },
       updateDimensions: (id, width, height) => {
@@ -1735,14 +2046,27 @@ function MindMapInner({ rootId }: { rootId: string }) {
           if (c.has(id)) c.delete(id);
           else c.add(id);
 
+          saveMapStatePatch(rootId, { collapsedIds: Array.from(c) });
+
           setTimeout(() => {
             const currentItems = useStore.getState().items;
-            const pos = layoutTree(currentItems, rootId, c, dimensionsRef.current);
+            const rootNode = currentItems[rootId];
+            if (!rootNode) return;
+            const currentScoped: Record<string, ItemNode> = { [rootId]: rootNode };
+            for (const it of Object.values(currentItems)) {
+              if (it.id === rootId) continue;
+              if ((it.scope_node_id ?? null) === activeScopeId) {
+                currentScoped[it.id] = it;
+              }
+            }
+            const pos = layoutTree(currentScoped, rootId, c, dimensionsRef.current);
             useStore.getState().updateItems(
-              Object.entries(pos).map(([nodeId, p]) => ({
-                id: nodeId,
-                patch: { canvas: { ...(currentItems[nodeId]?.canvas ?? {}), ...p } },
-              })),
+              Object.entries(pos)
+                .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
+                .map(([nodeId, p]) => ({
+                  id: nodeId,
+                  patch: { canvas: { ...(currentItems[nodeId]?.canvas ?? {}), ...p } },
+                })),
             );
           }, 0);
 
@@ -1755,6 +2079,8 @@ function MindMapInner({ rootId }: { rootId: string }) {
       createChildPage: (parentId) => {
         const n = createItem({
           parent_id: parentId,
+          scope_node_id: activeScopeId,
+          project_id: items[parentId]?.project_id ?? root?.project_id ?? null,
           title: "Nova subpágina vinculada",
           type: "PAGE",
           icon: "📄",
@@ -1765,21 +2091,31 @@ function MindMapInner({ rootId }: { rootId: string }) {
       deleteNode: (id) => {
         deleteItem(id);
         setTimeout(() => {
-          const remainingItems = { ...useStore.getState().items };
-          delete remainingItems[id];
-          const pos = layoutTree(remainingItems, rootId, collapsed, dimensionsRef.current);
+          const allNow = useStore.getState().items;
+          const rootNode = allNow[rootId];
+          if (!rootNode) return;
+          const remainingScoped: Record<string, ItemNode> = { [rootId]: rootNode };
+          for (const it of Object.values(allNow)) {
+            if (it.id === rootId) continue;
+            if ((it.scope_node_id ?? null) === activeScopeId) {
+              remainingScoped[it.id] = it;
+            }
+          }
+          const pos = layoutTree(remainingScoped, rootId, collapsed, dimensionsRef.current);
           useStore.getState().updateItems(
-            Object.entries(pos).map(([nodeId, p]) => ({
-              id: nodeId,
-              patch: { canvas: { ...(remainingItems[nodeId]?.canvas ?? {}), ...p } },
-            })),
+            Object.entries(pos)
+              .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
+              .map(([nodeId, p]) => ({
+                id: nodeId,
+                patch: { canvas: { ...(remainingScoped[nodeId]?.canvas ?? {}), ...p } },
+              })),
           );
         }, 0);
       },
       quickAddConnected: (sourceId, shape, direction) =>
         quickAddConnected(sourceId, shape, direction),
     }),
-    [updateItem, openDrawer, createItem, deleteItem, rootId, collapsed, scheduleRelayout, items, quickAddConnected],
+    [updateItem, openDrawer, createItem, deleteItem, rootId, activeScopeId, isSubmap, root?.project_id, collapsed, scheduleRelayout, items, quickAddConnected],
   );
 
   if (!root) return <div className="empty-state"><h1>Mapa não encontrado</h1></div>;
@@ -1797,6 +2133,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
           onNodeDragStop={onNodeDragStop}
           onConnect={onConnect}
           onEdgesDelete={onEdgesDelete}
+          onMoveEnd={(_event, viewport) => {
+            latestViewportRef.current = viewport;
+            saveMapStatePatch(rootId, { viewport });
+          }}
           onPaneClick={() => {
             setEditingId(null);
             setProcessMenuOpen(false);
@@ -1808,8 +2148,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
           selectionKeyCode={null}
           multiSelectionKeyCode="Shift"
           deleteKeyCode={null}
-          fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1.1 }}
+          fitView={false}
           minZoom={0.1}
           maxZoom={2.5}
           onlyRenderVisibleElements
@@ -1838,8 +2177,87 @@ function MindMapInner({ rootId }: { rootId: string }) {
             )}
           </ViewportPortal>
 
-          <Panel position="top-left" className="canvas-panel glass">
-            <span className="canvas-root-title">{typeIcon(root)} {root.title || "Sem título"}</span>
+          <Panel
+            position="top-left"
+            className="canvas-panel glass"
+            style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          >
+            {isSubmap && breadcrumbTrail.length > 0 ? (
+              <>
+                <Link
+                  href={`/canvas/${breadcrumbTrail[breadcrumbTrail.length - 1].mapItem.id}?focusNode=${breadcrumbTrail[breadcrumbTrail.length - 1].focusNodeId}`}
+                  className="btn btn-ghost btn-xs"
+                  title="Voltar ao mapa anterior centralizando neste nó"
+                >
+                  <ArrowLeft size={13} />
+                  <span>Voltar</span>
+                </Link>
+
+                <div
+                  className="submap-breadcrumb"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontSize: 12.5,
+                    padding: "2px 6px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {breadcrumbTrail.map((step) => (
+                    <span
+                      key={step.mapItem.id}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+                    >
+                      <Link
+                        href={`/canvas/${step.mapItem.id}?focusNode=${step.focusNodeId}`}
+                        className="muted"
+                        style={{ textDecoration: "none", fontWeight: 500 }}
+                        title={`Voltar para ${step.label}`}
+                      >
+                        {step.label}
+                      </Link>
+                      <ChevronRight size={12} className="muted" />
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => openDrawer(root.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--text)",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                      fontSize: "inherit",
+                    }}
+                    title="Abrir detalhes deste nó na gaveta"
+                  >
+                    {typeIcon(root)} {root.title || "Sem título"}
+                  </button>
+                  <ChevronRight size={12} className="muted" />
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "rgba(124, 92, 255, 0.14)",
+                      color: "#a78bfa",
+                      fontWeight: 600,
+                      fontSize: 11.5,
+                    }}
+                  >
+                    <Workflow size={11} />
+                    Processo
+                  </span>
+                </div>
+              </>
+            ) : (
+              <span className="canvas-root-title">{typeIcon(root)} {root.title || "Sem título"}</span>
+            )}
             {(isSharedWithMe || rootShareCount > 0) && (
               <span className="shared-badge" title={isSharedWithMe ? "Compartilhado com você" : `Compartilhado com ${rootShareCount} pessoa(s)`}>
                 <Users size={11} />
