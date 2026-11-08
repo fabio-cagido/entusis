@@ -49,13 +49,26 @@ export function statusFromKanbanNodeTitle(title: string | null | undefined): Sta
   return null;
 }
 
+export function getWeekBucketTitle(date: Date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const weekOfMonth = Math.ceil(date.getDate() / 7);
+  return `${month}-Semana ${weekOfMonth}`;
+}
+
 export function getKanbanStatusForNode(
   items: Record<string, ItemNode>,
   nodeId: string | null | undefined
 ): Status | null {
   if (!nodeId || !items[nodeId]) return null;
   const node = items[nodeId];
-  return statusFromKanbanNodeTitle(node.title);
+  const direct = statusFromKanbanNodeTitle(node.title);
+  if (direct) return direct;
+  // Sub-nó temporal de semana filho direto do nó "Concluído"
+  if (node.status === null && node.parent_id && items[node.parent_id]) {
+    const parentStatus = statusFromKanbanNodeTitle(items[node.parent_id].title);
+    if (parentStatus === "DONE") return "DONE";
+  }
+  return null;
 }
 
 export function isChildOfKanbanStatusNode(
@@ -66,11 +79,23 @@ export function isChildOfKanbanStatusNode(
   const parent = items[item.parent_id];
   if (!parent) return false;
   const parentStatus = statusFromKanbanNodeTitle(parent.title);
-  if (!parentStatus) return false;
-  if (parent.parent_id && items[parent.parent_id]) {
-    return isKanbanRootTitle(items[parent.parent_id].title);
+  if (parentStatus) {
+    if (parent.parent_id && items[parent.parent_id]) {
+      return isKanbanRootTitle(items[parent.parent_id].title);
+    }
+    return parent.status === null;
   }
-  return parent.status === null;
+  // Caso a tarefa esteja dentro de um sub-nó de semana filho de "Concluído"
+  if (parent.status === null && parent.parent_id && items[parent.parent_id]) {
+    const grandParent = items[parent.parent_id];
+    if (statusFromKanbanNodeTitle(grandParent.title) === "DONE") {
+      if (grandParent.parent_id && items[grandParent.parent_id]) {
+        return isKanbanRootTitle(items[grandParent.parent_id].title);
+      }
+      return grandParent.status === null;
+    }
+  }
+  return false;
 }
 
 export function findProjectKanbanStatusNode(
@@ -781,20 +806,66 @@ export const useStore = create<State>((set, get) => {
             );
           }
           if (statusNode) {
-            resolvedParentId = statusNode.id;
-            if (!resolvedCanvas && statusNode.canvas) {
-              const statusChildren = Object.values(state.items).filter(
-                (i) => i.parent_id === statusNode.id && i.canvas
+            let destinationParent = statusNode;
+
+            if (resolvedStatus === "DONE") {
+              const weekLabel = getWeekBucketTitle(new Date());
+              const currentItems = get().items;
+              let weekNode =
+                Object.values(currentItems).find(
+                  (it) =>
+                    it.parent_id === statusNode.id &&
+                    it.status === null &&
+                    it.title.trim().toLowerCase() === weekLabel.toLowerCase()
+                ) ?? null;
+
+              if (!weekNode) {
+                const doneChildren = Object.values(currentItems).filter(
+                  (i) => i.parent_id === statusNode.id
+                );
+                const maxDoneOrder = doneChildren.reduce((m, c) => Math.max(m, c.sort_order), -10);
+                const placedDoneChildren = doneChildren.filter((c) => c.canvas);
+                const weekX = (statusNode.canvas?.x ?? 540) + 260;
+                const weekY =
+                  placedDoneChildren.length > 0
+                    ? Math.max(...placedDoneChildren.map((c) => c.canvas?.y ?? 0)) + 76
+                    : statusNode.canvas?.y ?? 0;
+
+                weekNode = newItem({
+                  title: weekLabel,
+                  icon: "🗓️",
+                  type: "MINDMAP_NODE",
+                  parent_id: statusNode.id,
+                  project_id: resolvedProjectId,
+                  status: null,
+                  sort_order: maxDoneOrder + 10,
+                  ...(state.currentUserId ? { user_id: state.currentUserId } : {}),
+                  canvas: {
+                    x: weekX,
+                    y: weekY,
+                    color: statusNode.canvas?.color ?? "#2dd4bf",
+                  },
+                });
+                set((s) => ({ items: { ...s.items, [weekNode!.id]: weekNode! } }));
+                touchItems([weekNode.id]);
+              }
+              destinationParent = weekNode;
+            }
+
+            resolvedParentId = destinationParent.id;
+            if (!resolvedCanvas && destinationParent.canvas) {
+              const destChildren = Object.values(get().items).filter(
+                (i) => i.parent_id === destinationParent.id && i.canvas
               );
-              const baseX = (statusNode.canvas.x ?? 540) + 260;
+              const baseX = (destinationParent.canvas.x ?? 540) + 260;
               const baseY =
-                statusChildren.length > 0
-                  ? Math.max(...statusChildren.map((c) => c.canvas?.y ?? 0)) + 68
-                  : statusNode.canvas.y ?? 0;
+                destChildren.length > 0
+                  ? Math.max(...destChildren.map((c) => c.canvas?.y ?? 0)) + 68
+                  : destinationParent.canvas.y ?? 0;
               resolvedCanvas = {
                 x: baseX,
                 y: baseY,
-                color: statusNode.canvas.color ?? proj?.color ?? "#38bdf8",
+                color: destinationParent.canvas.color ?? proj?.color ?? "#38bdf8",
               };
             }
           }
@@ -810,6 +881,7 @@ export const useStore = create<State>((set, get) => {
       const it = newItem({
         sort_order: maxOrder + 1,
         ...(inheritedUserId ? { user_id: inheritedUserId } : {}),
+        ...(resolvedStatus === "DONE" ? { completed_at: new Date().toISOString() } : {}),
         ...p,
         parent_id: resolvedParentId,
         status: resolvedStatus,
@@ -845,9 +917,11 @@ export const useStore = create<State>((set, get) => {
     },
 
     updateItems(patches) {
-      const t = new Date().toISOString();
+      const nowDate = new Date();
+      const t = nowDate.toISOString();
       const { projects } = get();
       const projectUpdates: { id: string; name: string }[] = [];
+      const extraTouchedIds: string[] = [];
 
       set((s) => {
         const items = { ...s.items };
@@ -856,19 +930,35 @@ export const useStore = create<State>((set, get) => {
           if (!cur) continue;
           const nextPatch: Partial<ItemNode> = { ...patch };
 
-          // Sincronização Bidirecional Kanban -> Mapa Mental:
-          // Se a tarefa é filha de um dos nós de status do Kanban ("Backlog", "A Fazer", "Fazendo", "Concluído")
-          // e seu status foi alterado no quadro Kanban (e parent_id não foi explicitamente passado no patch),
-          // move o parent_id automaticamente para o nó do novo status correspondente.
-          // Se pertencer a outro ramo do mapa (ideia/processo), mantém seu pai e posição intactos.
+          // 1. Registro de completed_at exclusivamente no evento de transição de status
+          if (nextPatch.status !== undefined && nextPatch.status !== cur.status) {
+            if (nextPatch.status === "DONE") {
+              nextPatch.completed_at = t;
+            } else if (cur.status === "DONE") {
+              nextPatch.completed_at = null;
+            }
+          }
+
+          // 2. Sincronização Bidirecional Kanban -> Mapa Mental + Agrupamento Temporal em "Concluído":
+          const isOrphanOrProjectRootTask =
+            Boolean(cur.project_id) &&
+            (!cur.parent_id || cur.parent_id === s.projects[cur.project_id!]?.page_id);
           if (
             nextPatch.status !== undefined &&
             nextPatch.status !== null &&
             nextPatch.status !== cur.status &&
             nextPatch.parent_id === undefined &&
-            isChildOfKanbanStatusNode(items, cur)
+            (isChildOfKanbanStatusNode(items, cur) || isOrphanOrProjectRootTask)
           ) {
-            const currentStatusParent = cur.parent_id ? items[cur.parent_id] : null;
+            const currentParent = cur.parent_id ? items[cur.parent_id] : null;
+            // Se currentParent for um sub-nó de semana sob "Concluído", sobe mais um nível para achar o ramo "📋 Kanban"
+            const currentStatusParent =
+              currentParent &&
+              statusFromKanbanNodeTitle(currentParent.title) === null &&
+              currentParent.parent_id &&
+              items[currentParent.parent_id]
+                ? items[currentParent.parent_id]
+                : currentParent;
             const kanbanBranchId = currentStatusParent?.parent_id ?? null;
             const targetProjectId =
               nextPatch.project_id !== undefined ? nextPatch.project_id : cur.project_id;
@@ -897,27 +987,78 @@ export const useStore = create<State>((set, get) => {
               );
             }
 
-            if (targetStatusNode && targetStatusNode.id !== cur.parent_id) {
-              const targetSiblings = Object.values(items).filter(
-                (i) => i.parent_id === targetStatusNode!.id && i.id !== id
-              );
-              const maxOrder = targetSiblings.reduce((m, sib) => Math.max(m, sib.sort_order), -10);
-              nextPatch.parent_id = targetStatusNode.id;
-              nextPatch.sort_order = maxOrder + 10;
+            if (targetStatusNode) {
+              let destinationParentNode = targetStatusNode;
 
-              if (targetStatusNode.canvas) {
-                const placedSiblings = targetSiblings.filter((sib) => sib.canvas);
-                const nextX = (targetStatusNode.canvas.x ?? 540) + 260;
-                const nextY =
-                  placedSiblings.length > 0
-                    ? Math.max(...placedSiblings.map((sib) => sib.canvas?.y ?? 0)) + 68
-                    : targetStatusNode.canvas.y ?? 0;
-                nextPatch.canvas = {
-                  ...(cur.canvas ?? {}),
-                  x: nextX,
-                  y: nextY,
-                  color: targetStatusNode.canvas.color ?? cur.canvas?.color ?? null,
-                };
+              // Se a transição for para "Concluído" (DONE), agrupa sob o sub-nó da semana atual (ex: "11-Semana 2")
+              if (nextPatch.status === "DONE") {
+                const weekLabel = getWeekBucketTitle(nowDate);
+                let weekNode =
+                  Object.values(items).find(
+                    (it) =>
+                      it.parent_id === targetStatusNode!.id &&
+                      it.status === null &&
+                      it.title.trim().toLowerCase() === weekLabel.toLowerCase()
+                  ) ?? null;
+
+                if (!weekNode) {
+                  const doneChildren = Object.values(items).filter(
+                    (i) => i.parent_id === targetStatusNode!.id
+                  );
+                  const maxDoneOrder = doneChildren.reduce((m, c) => Math.max(m, c.sort_order), -10);
+                  const placedDoneChildren = doneChildren.filter((c) => c.canvas);
+                  const weekX = (targetStatusNode.canvas?.x ?? 540) + 260;
+                  const weekY =
+                    placedDoneChildren.length > 0
+                      ? Math.max(...placedDoneChildren.map((c) => c.canvas?.y ?? 0)) + 76
+                      : targetStatusNode.canvas?.y ?? 0;
+
+                  weekNode = newItem({
+                    title: weekLabel,
+                    icon: "🗓️",
+                    type: "MINDMAP_NODE",
+                    parent_id: targetStatusNode.id,
+                    project_id: targetProjectId ?? targetStatusNode.project_id,
+                    status: null,
+                    sort_order: maxDoneOrder + 10,
+                    ...(cur.user_id || s.currentUserId
+                      ? { user_id: cur.user_id ?? s.currentUserId ?? undefined }
+                      : {}),
+                    canvas: {
+                      x: weekX,
+                      y: weekY,
+                      color: targetStatusNode.canvas?.color ?? "#2dd4bf",
+                    },
+                  });
+                  items[weekNode.id] = weekNode;
+                  extraTouchedIds.push(weekNode.id);
+                }
+
+                destinationParentNode = weekNode;
+              }
+
+              if (destinationParentNode.id !== cur.parent_id) {
+                const targetSiblings = Object.values(items).filter(
+                  (i) => i.parent_id === destinationParentNode.id && i.id !== id
+                );
+                const maxOrder = targetSiblings.reduce((m, sib) => Math.max(m, sib.sort_order), -10);
+                nextPatch.parent_id = destinationParentNode.id;
+                nextPatch.sort_order = maxOrder + 10;
+
+                if (destinationParentNode.canvas) {
+                  const placedSiblings = targetSiblings.filter((sib) => sib.canvas);
+                  const nextX = (destinationParentNode.canvas.x ?? 540) + 260;
+                  const nextY =
+                    placedSiblings.length > 0
+                      ? Math.max(...placedSiblings.map((sib) => sib.canvas?.y ?? 0)) + 68
+                      : destinationParentNode.canvas.y ?? 0;
+                  nextPatch.canvas = {
+                    ...(cur.canvas ?? {}),
+                    x: nextX,
+                    y: nextY,
+                    color: destinationParentNode.canvas.color ?? cur.canvas?.color ?? null,
+                  };
+                }
               }
             }
           }
@@ -938,7 +1079,7 @@ export const useStore = create<State>((set, get) => {
       for (const pu of projectUpdates) {
         get().updateProject(pu.id, { name: pu.name });
       }
-      touchItems(patches.map((p) => p.id));
+      touchItems([...patches.map((p) => p.id), ...extraTouchedIds]);
     },
 
     deleteItem(id) {
@@ -1125,16 +1266,74 @@ export const useStore = create<State>((set, get) => {
 
     moveItem(id, parentId) {
       const { items } = get();
+      const cur = items[id];
+      if (!cur) return;
       // Prevent cycles: target cannot be a descendant of id.
       let p = parentId;
       while (p) {
         if (p === id) return;
         p = items[p]?.parent_id ?? null;
       }
-      const siblings = Object.values(items).filter((i) => i.parent_id === parentId);
-      const maxOrder = siblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
       const matchedStatus = getKanbanStatusForNode(items, parentId);
       const targetParent = parentId ? items[parentId] : null;
+
+      // Se o usuário soltar uma tarefa diretamente sobre o nó "Concluído" no Mapa Mental (e ela ainda não estava concluída),
+      // cria/reutiliza o sub-nó da semana atual sob "Concluído"
+      if (
+        matchedStatus === "DONE" &&
+        targetParent &&
+        statusFromKanbanNodeTitle(targetParent.title) === "DONE" &&
+        cur.status !== "DONE"
+      ) {
+        const weekLabel = getWeekBucketTitle(new Date());
+        let weekNode =
+          Object.values(items).find(
+            (it) =>
+              it.parent_id === targetParent.id &&
+              it.status === null &&
+              it.title.trim().toLowerCase() === weekLabel.toLowerCase()
+          ) ?? null;
+
+        if (!weekNode) {
+          const doneChildren = Object.values(items).filter((i) => i.parent_id === targetParent.id);
+          const maxDoneOrder = doneChildren.reduce((m, c) => Math.max(m, c.sort_order), -10);
+          const placedDoneChildren = doneChildren.filter((c) => c.canvas);
+          const weekX = (targetParent.canvas?.x ?? 540) + 260;
+          const weekY =
+            placedDoneChildren.length > 0
+              ? Math.max(...placedDoneChildren.map((c) => c.canvas?.y ?? 0)) + 76
+              : targetParent.canvas?.y ?? 0;
+
+          weekNode = get().createItem({
+            title: weekLabel,
+            icon: "🗓️",
+            type: "MINDMAP_NODE",
+            parent_id: targetParent.id,
+            project_id: targetParent.project_id ?? cur.project_id,
+            status: null,
+            sort_order: maxDoneOrder + 10,
+            canvas: {
+              x: weekX,
+              y: weekY,
+              color: targetParent.canvas?.color ?? "#2dd4bf",
+            },
+          });
+        }
+
+        const freshItems = get().items;
+        const weekSiblings = Object.values(freshItems).filter((i) => i.parent_id === weekNode!.id);
+        const maxWeekOrder = weekSiblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
+        get().updateItem(id, {
+          parent_id: weekNode.id,
+          sort_order: maxWeekOrder + 1,
+          status: "DONE",
+          ...(targetParent.project_id ? { project_id: targetParent.project_id } : {}),
+        });
+        return;
+      }
+
+      const siblings = Object.values(items).filter((i) => i.parent_id === parentId);
+      const maxOrder = siblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
       get().updateItem(id, {
         parent_id: parentId,
         sort_order: maxOrder + 1,

@@ -61,6 +61,14 @@ export async function GET(request: NextRequest) {
       if (!error && data.session) {
         const targetUrl = new URL(nextPath, origin);
         targetUrl.searchParams.set("gcal", "connected");
+        if (data.session.provider_token) {
+          const hashParams = new URLSearchParams();
+          hashParams.set("provider_token", data.session.provider_token);
+          if (data.session.provider_refresh_token) {
+            hashParams.set("provider_refresh_token", data.session.provider_refresh_token);
+          }
+          targetUrl.hash = hashParams.toString();
+        }
         const response = NextResponse.redirect(targetUrl);
 
         // Garantir que todos os cookies da sessão sejam gravados no cabeçalho Set-Cookie do redirect

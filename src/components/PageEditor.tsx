@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  Calendar,
   CalendarClock,
+  Check,
   ExternalLink,
   FileBox,
   Globe,
@@ -15,10 +17,13 @@ import {
   Loader2,
   Paperclip,
   Plus,
+  RefreshCw,
   Repeat,
   Sunrise,
   Trash2,
+  Unlink,
   Upload,
+  Users,
   X,
 } from "lucide-react";
 import { ancestorsOf, childrenOf, useStore, viewHref } from "@/lib/store";
@@ -28,7 +33,13 @@ import { detectAttachmentKind, formatWhen, fromLocalInput, toLocalInput, typeIco
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import RichEditor from "./RichEditor";
 import ViewSwitcher from "./ViewSwitcher";
-import { connectGoogleCalendar, createGoogleCalendarEvent, isGcalConnected } from "@/lib/google/calendar";
+import {
+  connectGoogleCalendar,
+  createGoogleCalendarEvent,
+  fetchGoogleContactSuggestions,
+  verifyGoogleCalendarEvent,
+  type GoogleContactSuggestion,
+} from "@/lib/google/calendar";
 
 const ATTACHMENTS_BUCKET = "attachments";
 
@@ -38,8 +49,217 @@ const EMOJIS = ["📄", "🧠", "🎯", "🚀", "💡", "📌", "📚", "🗂️
 
 function Properties({ item }: { item: ItemNode }) {
   const projects = useStore((s) => s.projects);
+  const items = useStore((s) => s.items);
+  const shares = useStore((s) => s.shares);
   const updateItem = useStore((s) => s.updateItem);
   const projectList = useMemo(() => Object.values(projects).sort((a, b) => a.sort_order - b.sort_order), [projects]);
+
+  const [participantInput, setParticipantInput] = useState("");
+  const [participantError, setParticipantError] = useState<string | null>(null);
+  const [contactSuggestions, setContactSuggestions] = useState<GoogleContactSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const [gcalSyncing, setGcalSyncing] = useState(false);
+  const [pendingScheduleConfirm, setPendingScheduleConfirm] = useState(false);
+  const [gcalFeedback, setGcalFeedback] = useState<{
+    type: "info" | "success" | "error";
+    text: string;
+    needsConnect?: boolean;
+  } | null>(null);
+
+  const attendees = useMemo(() => item.attendees ?? [], [item.attendees]);
+
+  useEffect(() => {
+    let active = true;
+    fetchGoogleContactSuggestions().then((list) => {
+      if (active) setContactSuggestions(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Reconciliação automática: ao abrir a tarefa (ou retornar à aba), verifica se o google_event_id ainda existe e não foi cancelado
+  useEffect(() => {
+    const gId = item.schedule.google_event_id;
+    if (!gId) return;
+
+    let cancelled = false;
+    const checkEventStillActive = async () => {
+      const status = await verifyGoogleCalendarEvent(gId);
+      if (!cancelled && status === "deleted") {
+        updateItem(item.id, {
+          schedule: {
+            ...item.schedule,
+            google_event_id: null,
+            google_event_link: null,
+          },
+        });
+        setGcalFeedback({
+          type: "info",
+          text: "O evento vinculado foi excluído na Google Agenda. Vínculo desfeito automaticamente.",
+        });
+      }
+    };
+
+    void checkEventStillActive();
+    const onFocus = () => {
+      void checkEventStillActive();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [item.id, item.schedule.google_event_id, item.schedule, updateItem]);
+
+  const allSuggestions = useMemo(() => {
+    const map = new Map<string, GoogleContactSuggestion>();
+    for (const c of contactSuggestions) {
+      map.set(c.email.toLowerCase(), c);
+    }
+    for (const sh of Object.values(shares)) {
+      const em = sh.invited_email?.trim().toLowerCase();
+      if (em && !map.has(em)) map.set(em, { email: em });
+    }
+    for (const it of Object.values(items)) {
+      for (const em of it.attendees ?? []) {
+        const clean = em.trim().toLowerCase();
+        if (clean && !map.has(clean)) map.set(clean, { email: clean });
+      }
+    }
+    const q = participantInput.trim().toLowerCase();
+    return Array.from(map.values())
+      .filter((s) => !attendees.includes(s.email))
+      .filter(
+        (s) =>
+          !q ||
+          s.email.toLowerCase().includes(q) ||
+          (s.name && s.name.toLowerCase().includes(q))
+      )
+      .slice(0, 6);
+  }, [contactSuggestions, shares, items, participantInput, attendees]);
+
+  const addParticipantsFromRaw = (raw: string) => {
+    const tokens = raw
+      .split(/[,;\s]+/)
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    if (tokens.length === 0) return;
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const validNew: string[] = [];
+    let invalidFound = false;
+
+    for (const tk of tokens) {
+      if (emailRegex.test(tk)) {
+        if (!attendees.includes(tk) && !validNew.includes(tk)) {
+          validNew.push(tk);
+        }
+      } else {
+        invalidFound = true;
+      }
+    }
+
+    if (validNew.length > 0) {
+      updateItem(item.id, { attendees: [...attendees, ...validNew] });
+      setParticipantInput("");
+      setParticipantError(null);
+    } else if (invalidFound) {
+      setParticipantError("Digite um e-mail válido (ex: nome@empresa.com)");
+    } else {
+      setParticipantInput("");
+      setParticipantError(null);
+    }
+  };
+
+  const removeParticipant = (emailToRemove: string) => {
+    updateItem(item.id, {
+      attendees: attendees.filter((e) => e !== emailToRemove),
+    });
+  };
+
+  const handleSyncToGoogleCalendar = async () => {
+    setGcalFeedback(null);
+
+    if (!item.schedule.start_time) {
+      const nextHour = new Date();
+      nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+      const oneHourLater = new Date(nextHour.getTime() + 3600_000);
+      const startIso = nextHour.toISOString();
+      const endIso = oneHourLater.toISOString();
+
+      updateItem(item.id, {
+        schedule: {
+          ...item.schedule,
+          start_time: startIso,
+          end_time: endIso,
+        },
+      });
+      setPendingScheduleConfirm(true);
+      setGcalFeedback({
+        type: "info",
+        text: `Horário sugerido para hoje às ${nextHour.toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}. Ajuste se desejar e clique em "Confirmar Agendamento".`,
+      });
+
+      setTimeout(() => {
+        const startEl = document.getElementById("prop-start") as HTMLInputElement | null;
+        if (startEl) {
+          startEl.focus();
+          try {
+            startEl.showPicker?.();
+          } catch {
+            // fallback if browser blocks programmatic showPicker
+          }
+        }
+      }, 30);
+      return;
+    }
+
+    setPendingScheduleConfirm(false);
+    setGcalSyncing(true);
+    try {
+      const res = await createGoogleCalendarEvent({
+        id: item.id,
+        title: item.title || "Sem título",
+        content: item.content,
+        attendees,
+        schedule: item.schedule,
+      });
+
+      if (res.success && res.google_event_id) {
+        updateItem(item.id, {
+          schedule: {
+            ...item.schedule,
+            google_event_id: res.google_event_id,
+            google_event_link: res.htmlLink ?? item.schedule.google_event_link ?? null,
+          },
+        });
+        setGcalFeedback({
+          type: "success",
+          text: item.schedule.google_event_id
+            ? "Evento atualizado na Google Agenda!"
+            : "Evento criado na Google Agenda!",
+        });
+      } else {
+        const errMsg = res.error || "Não foi possível sincronizar com a Google Agenda.";
+        const needsConn =
+          errMsg.toLowerCase().includes("conect") ||
+          errMsg.toLowerCase().includes("expir") ||
+          errMsg.includes("401");
+        setGcalFeedback({
+          type: "error",
+          text: errMsg,
+          needsConnect: needsConn,
+        });
+      }
+    } finally {
+      setGcalSyncing(false);
+    }
+  };
 
   return (
     <div className="props">
@@ -99,11 +319,21 @@ function Properties({ item }: { item: ItemNode }) {
           type="datetime-local"
           className="input"
           value={toLocalInput(item.schedule.start_time)}
+          onClick={(e) => {
+            try {
+              e.currentTarget.showPicker?.();
+            } catch {
+              // ignore if already open or unsupported
+            }
+          }}
           onChange={(e) => {
             const start = fromLocalInput(e.target.value);
             let end = item.schedule.end_time;
             if (start && (!end || end < start)) end = new Date(new Date(start).getTime() + 3600_000).toISOString();
-            if (!start) end = null;
+            if (!start) {
+              end = null;
+              setPendingScheduleConfirm(false);
+            }
             updateItem(item.id, { schedule: { ...item.schedule, start_time: start, end_time: end } });
           }}
         />
@@ -117,6 +347,13 @@ function Properties({ item }: { item: ItemNode }) {
           className="input"
           disabled={!item.schedule.start_time}
           value={toLocalInput(item.schedule.end_time)}
+          onClick={(e) => {
+            try {
+              e.currentTarget.showPicker?.();
+            } catch {
+              // ignore if already open or unsupported
+            }
+          }}
           onChange={(e) => updateItem(item.id, { schedule: { ...item.schedule, end_time: fromLocalInput(e.target.value) } })}
         />
       </label>
@@ -245,36 +482,210 @@ function Properties({ item }: { item: ItemNode }) {
         </>
       )}
 
-      {item.schedule.start_time && (
-        <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
-          {item.schedule.google_event_id ? (
-            <span className="gcal-connected-badge">
-              <span className="gcal-dot is-online" /> Sincronizado com Google Calendar
-            </span>
-          ) : isGcalConnected() ? (
+      {/* Botão de Ação: Criar / Gerenciar Evento na Google Agenda */}
+      <div className="prop prop-gcal-action">
+        <span className="prop-label">
+          <Calendar size={12} /> Google Agenda
+        </span>
+        {item.schedule.google_event_id ? (
+          <div className="gcal-event-actions-group">
+            <a
+              href={
+                item.schedule.google_event_link ||
+                "https://calendar.google.com/calendar/r"
+              }
+              target="_blank"
+              rel="noreferrer"
+              className="gcal-event-synced-btn"
+              title="Abrir evento na Google Agenda em nova aba"
+            >
+              <Check size={13} />
+              <span>Na Google Agenda</span>
+              <ExternalLink size={11} />
+            </a>
             <button
-              className="btn btn-ghost btn-xs"
-              style={{ color: "#4285f4", display: "inline-flex", alignItems: "center", gap: 4 }}
-              onClick={async () => {
-                const res = await createGoogleCalendarEvent(item);
-                if (res.success && res.google_event_id) {
-                  updateItem(item.id, {
-                    schedule: { ...item.schedule, google_event_id: res.google_event_id },
-                  });
-                } else if (res.error) {
-                  alert(res.error);
+              type="button"
+              className="icon-btn gcal-mini-action"
+              onClick={handleSyncToGoogleCalendar}
+              disabled={gcalSyncing}
+              title="Atualizar dados e participantes deste evento na Google Agenda"
+            >
+              <RefreshCw size={12} className={gcalSyncing ? "spin" : ""} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn gcal-mini-action"
+              onClick={() => {
+                updateItem(item.id, {
+                  schedule: {
+                    ...item.schedule,
+                    google_event_id: null,
+                    google_event_link: null,
+                  },
+                });
+                setGcalFeedback({
+                  type: "info",
+                  text: "Vínculo com o evento removido localmente.",
+                });
+              }}
+              title="Desvincular evento da Google Agenda"
+            >
+              <Unlink size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            id="prop-create-gcal-event"
+            className={`gcal-create-event-btn ${
+              pendingScheduleConfirm && item.schedule.start_time ? "is-confirm-ready" : ""
+            }`}
+            disabled={gcalSyncing}
+            onClick={handleSyncToGoogleCalendar}
+          >
+            {gcalSyncing ? (
+              <>
+                <Loader2 size={13} className="spin" />
+                <span>Criando evento…</span>
+              </>
+            ) : pendingScheduleConfirm && item.schedule.start_time ? (
+              <>
+                <Check size={13} />
+                <span>Confirmar Agendamento</span>
+              </>
+            ) : (
+              <>
+                <Calendar size={13} />
+                <span>Criar Evento na Google Agenda</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Campo de Participantes (Attendees / Convidados) */}
+      <div className="prop prop-full-width">
+        <span className="prop-label">
+          <Users size={12} /> Participantes
+        </span>
+        <div className="participants-field-wrapper">
+          <div
+            className="participants-chips-box"
+            onClick={() => {
+              const el = document.getElementById(`participant-input-${item.id}`);
+              el?.focus();
+            }}
+          >
+            {attendees.map((email) => (
+              <span key={email} className="participant-chip">
+                <span className="participant-chip-avatar">
+                  {email.charAt(0).toUpperCase()}
+                </span>
+                <span className="participant-chip-email">{email}</span>
+                <button
+                  type="button"
+                  className="participant-chip-remove"
+                  title={`Remover ${email}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeParticipant(email);
+                  }}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+
+            <input
+              id={`participant-input-${item.id}`}
+              type="email"
+              className="participant-inline-input"
+              placeholder={
+                attendees.length === 0
+                  ? "Digite e-mails dos convidados e pressione Enter ou vírgula…"
+                  : "Adicionar outro e-mail…"
+              }
+              value={participantInput}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => {
+                setTimeout(() => setShowSuggestions(false), 160);
+                if (participantInput.trim()) {
+                  addParticipantsFromRaw(participantInput);
                 }
               }}
-            >
-              📅 Enviar para Google Calendar
-            </button>
-          ) : (
+              onChange={(e) => {
+                const val = e.target.value;
+                setParticipantError(null);
+                if (val.endsWith(",") || val.endsWith(";")) {
+                  addParticipantsFromRaw(val.slice(0, -1));
+                } else {
+                  setParticipantInput(val);
+                  setShowSuggestions(true);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") {
+                  e.preventDefault();
+                  if (participantInput.trim()) {
+                    addParticipantsFromRaw(participantInput);
+                  }
+                } else if (
+                  e.key === "Backspace" &&
+                  !participantInput &&
+                  attendees.length > 0
+                ) {
+                  removeParticipant(attendees[attendees.length - 1]);
+                }
+              }}
+            />
+          </div>
+
+          {showSuggestions && allSuggestions.length > 0 && (
+            <div className="participants-suggestions-popover glass">
+              <div className="participants-suggestions-head">
+                Sugestões de contatos
+              </div>
+              {allSuggestions.map((s) => (
+                <button
+                  key={s.email}
+                  type="button"
+                  className="participants-suggestion-item"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    addParticipantsFromRaw(s.email);
+                    setShowSuggestions(false);
+                  }}
+                >
+                  <span className="participant-chip-avatar">
+                    {(s.name || s.email).charAt(0).toUpperCase()}
+                  </span>
+                  <span className="participants-suggestion-info">
+                    {s.name && (
+                      <span className="participants-suggestion-name">{s.name}</span>
+                    )}
+                    <span className="participants-suggestion-email">{s.email}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {participantError && (
+            <p className="participants-feedback is-error">{participantError}</p>
+          )}
+        </div>
+      </div>
+
+      {gcalFeedback && (
+        <div className={`gcal-inline-feedback is-${gcalFeedback.type}`}>
+          <span>{gcalFeedback.text}</span>
+          {gcalFeedback.needsConnect && (
             <button
-              className="btn btn-ghost btn-xs"
-              style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}
-              onClick={() => connectGoogleCalendar()}
+              type="button"
+              className="gcal-inline-connect-btn"
+              onClick={() => connectGoogleCalendar(window.location.pathname + window.location.search)}
             >
-              🔗 Conectar Google Calendar para sincronizar
+              Conectar Google Agenda
             </button>
           )}
         </div>

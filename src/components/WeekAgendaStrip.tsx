@@ -24,6 +24,7 @@ import {
   getCachedGcalEvents,
   getGcalAccessToken,
   isGcalConnected,
+  verifyGoogleCalendarEvent,
   type GoogleCalendarEvent,
 } from "@/lib/google/calendar";
 
@@ -35,6 +36,7 @@ interface WeekAgendaStripProps {
 export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStripProps) {
   const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
+  const updateItems = useStore((s) => s.updateItems);
   const [collapsed, setCollapsed] = useState(false);
   const [dayOffset, setDayOffset] = useState(0); // 0 = a partir de hoje
 
@@ -73,15 +75,79 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
       const end = new Date(days[6]);
       end.setHours(23, 59, 59, 999);
 
-      const fetched = await fetchGoogleCalendarEvents(start, end);
-      setGcalEvents(fetched);
+      const fetched = await fetchGoogleCalendarEvents(start, end, (activeEvents) => {
+        const activeIds = new Set(activeEvents.map((e) => e.id));
+        const allItems = Object.values(useStore.getState().items);
+        const startMs = start.getTime();
+        const endMs = end.getTime();
+
+        const missingInWindow: ItemNode[] = [];
+        const outsideWindowWithGcal: ItemNode[] = [];
+
+        for (const it of allItems) {
+          const gId = it.schedule?.google_event_id;
+          if (!gId) continue;
+          if (activeIds.has(gId)) continue;
+
+          if (it.schedule.start_time) {
+            const stMs = new Date(it.schedule.start_time).getTime();
+            if (stMs >= startMs && stMs <= endMs) {
+              missingInWindow.push(it);
+              continue;
+            }
+          }
+          outsideWindowWithGcal.push(it);
+        }
+
+        // Eventos na janela de 7 dias que não vieram na resposta oficial do Google foram apagados/cancelados
+        if (missingInWindow.length > 0) {
+          updateItems(
+            missingInWindow.map((it) => ({
+              id: it.id,
+              patch: {
+                schedule: {
+                  ...it.schedule,
+                  start_time: null,
+                  end_time: null,
+                  google_event_id: null,
+                  google_event_link: null,
+                },
+              },
+            }))
+          );
+        }
+
+        // Verifica em background itens vinculados fora da janela de 7 dias
+        for (const it of outsideWindowWithGcal) {
+          const gId = it.schedule.google_event_id;
+          if (!gId) continue;
+          void verifyGoogleCalendarEvent(gId).then((status) => {
+            if (status === "deleted") {
+              const latest = useStore.getState().items[it.id];
+              if (latest && latest.schedule?.google_event_id === gId) {
+                useStore.getState().updateItem(it.id, {
+                  schedule: {
+                    ...latest.schedule,
+                    start_time: null,
+                    end_time: null,
+                    google_event_id: null,
+                    google_event_link: null,
+                  },
+                });
+              }
+            }
+          });
+        }
+      });
+      // Substitui integralmente o estado da agenda pelos eventos retornados pelo Google
+      setGcalEvents([...fetched]);
     } catch (err) {
       console.warn("[WeekAgendaStrip] error fetching gcal:", err);
     } finally {
       setIsGcalLoading(false);
       setIsConnected(isGcalConnected());
     }
-  }, [days]);
+  }, [days, updateItems]);
 
   useEffect(() => {
     setIsConnected(isGcalConnected());
@@ -111,6 +177,8 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
     };
   }, [loadGcalEvents]);
 
+  const activeGcalIdSet = useMemo(() => new Set(gcalEvents.map((e) => e.id)), [gcalEvents]);
+
   // Mapeia os itens agendados para os 7 dias
   const eventsByDay = useMemo(() => {
     const map = new Map<string, ItemNode[]>();
@@ -120,6 +188,10 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
 
     for (const it of Object.values(items)) {
       if (!it.schedule?.start_time) continue;
+      // Se o item possui vínculo com Google Calendar e estamos conectados, só exibe se o evento existir na lista ativa do Google
+      if (isConnected && it.schedule.google_event_id && !activeGcalIdSet.has(it.schedule.google_event_id)) {
+        continue;
+      }
       const itDate = new Date(it.schedule.start_time);
       const k = toKey(itDate);
       if (map.has(k)) {
@@ -133,15 +205,26 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
     }
 
     return map;
-  }, [days, items]);
+  }, [days, items, isConnected, activeGcalIdSet]);
 
-  // Mapeia os eventos do Google Calendar para os 7 dias
+  const linkedItemGcalIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of Object.values(items)) {
+      if (it.schedule?.google_event_id && it.schedule?.start_time) {
+        set.add(it.schedule.google_event_id);
+      }
+    }
+    return set;
+  }, [items]);
+
+  // Mapeia os eventos do Google Calendar para os 7 dias (evitando duplicar os que já têm card vinculado em eventsByDay)
   const gcalByDay = useMemo(() => {
     const map = new Map<string, GoogleCalendarEvent[]>();
     days.forEach((d) => map.set(toKey(d), []));
 
     for (const ge of gcalEvents) {
       if (!ge.start?.dateTime && !ge.start?.date) continue;
+      if (linkedItemGcalIds.has(ge.id)) continue;
       let k: string;
       if (ge.start.date) {
         k = ge.start.date;
@@ -155,7 +238,7 @@ export function WeekAgendaStrip({ onOpenDrawer, onCreateEvent }: WeekAgendaStrip
     }
 
     return map;
-  }, [days, gcalEvents]);
+  }, [days, gcalEvents, linkedItemGcalIds]);
 
   const isSameDay = (d1: Date, d2: Date) =>
     d1.getFullYear() === d2.getFullYear() &&

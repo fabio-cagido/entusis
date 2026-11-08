@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import { SupabaseRepository } from "@/lib/repository/supabase";
-import { setGcalTokens } from "@/lib/google/calendar";
+import { checkUrlForGoogleTokens, setGcalTokens } from "@/lib/google/calendar";
 import LoginScreen from "./LoginScreen";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
@@ -40,6 +40,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       try {
         // Fallback client-side PKCE: caso o Supabase redirecione diretamente com ?code= para a raiz ou /today
         if (typeof window !== "undefined") {
+          checkUrlForGoogleTokens();
           const url = new URL(window.location.href);
           const code = url.searchParams.get("code");
           if (code) {

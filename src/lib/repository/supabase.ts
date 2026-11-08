@@ -20,9 +20,12 @@ interface ItemRow {
   recurrence_day_of_week?: number | null;
   last_recurred_at?: string | null;
   deleted_at?: string | null;
+  completed_at?: string | null;
   start_time: string | null;
   end_time: string | null;
   google_event_id: string | null;
+  google_event_link?: string | null;
+  attendees?: string[];
   attachments: ItemNode["attachments"];
   links: string[];
   canvas: ItemNode["canvas"];
@@ -63,8 +66,13 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
       : null;
   const lastRecurredAt = n.last_recurred_at || null;
   const deletedAt = n.deleted_at || null;
+  const completedAt = n.completed_at || null;
+  const attendeesList = Array.isArray(n.attendees)
+    ? n.attendees.map((e) => String(e).trim()).filter(Boolean)
+    : [];
+  const googleEventLink = n.schedule?.google_event_link || null;
 
-  // Store recurrence and soft-delete metadata inside canvas JSONB as well so it works seamlessly even before SQL migrations 0003/0005 are run.
+  // Store recurrence, soft-delete, and attendees metadata inside canvas JSONB as well so it works seamlessly even before SQL migrations 0003/0005/0006 are run.
   let canvasPayload: ItemNode["canvas"] = n.canvas ? { ...n.canvas } : null;
   if (isRecurring || lastRecurredAt) {
     canvasPayload = {
@@ -93,6 +101,42 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     };
   } else if (canvasPayload?.deleted_at) {
     const { deleted_at: _removedDel, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
+  if (completedAt) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      completed_at: completedAt,
+    };
+  } else if (canvasPayload?.completed_at) {
+    const { completed_at: _removedComp, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
+  if (attendeesList.length > 0) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      attendees: attendeesList,
+    };
+  } else if (canvasPayload?.attendees) {
+    const { attendees: _removedAtt, ...restCanvas } = canvasPayload;
+    canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
+  }
+
+  if (googleEventLink) {
+    canvasPayload = {
+      x: canvasPayload?.x ?? 0,
+      y: canvasPayload?.y ?? 0,
+      ...(canvasPayload ?? {}),
+      google_event_link: googleEventLink,
+    };
+  } else if (canvasPayload?.google_event_link) {
+    const { google_event_link: _removedLink, ...restCanvas } = canvasPayload;
     canvasPayload = Object.keys(restCanvas).length > 0 ? (restCanvas as ItemNode["canvas"]) : null;
   }
 
@@ -126,6 +170,9 @@ const toRow = (n: ItemNode, userId: string, includeRecurrenceCols = true): ItemR
     baseRow.recurrence_day_of_week = recurrenceDayOfWeek;
     baseRow.last_recurred_at = lastRecurredAt;
     baseRow.deleted_at = deletedAt;
+    baseRow.completed_at = completedAt;
+    baseRow.attendees = attendeesList;
+    baseRow.google_event_link = googleEventLink;
   }
 
   return baseRow;
@@ -142,6 +189,14 @@ const fromRow = (r: ItemRow): ItemNode => {
     r.recurrence_day_of_week ?? recMeta?.recurrence_day_of_week ?? null;
   const lastRecurredAt = r.last_recurred_at ?? recMeta?.last_recurred_at ?? null;
   const deletedAt = r.deleted_at ?? r.canvas?.deleted_at ?? null;
+  const completedAt = r.completed_at ?? r.canvas?.completed_at ?? null;
+  const attendees =
+    Array.isArray(r.attendees) && r.attendees.length > 0
+      ? r.attendees
+      : Array.isArray(r.canvas?.attendees)
+      ? r.canvas!.attendees!
+      : [];
+  const googleEventLink = r.google_event_link ?? r.canvas?.google_event_link ?? null;
 
   return {
     id: r.id,
@@ -160,11 +215,14 @@ const fromRow = (r: ItemRow): ItemNode => {
     recurrence_day_of_week: recurrenceDayOfWeek,
     last_recurred_at: lastRecurredAt,
     deleted_at: deletedAt,
+    completed_at: completedAt,
     schedule: {
       start_time: r.start_time,
       end_time: r.end_time,
       google_event_id: r.google_event_id,
+      google_event_link: googleEventLink,
     },
+    attendees,
     attachments: r.attachments ?? [],
     links: r.links ?? [],
     canvas: r.canvas,

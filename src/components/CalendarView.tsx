@@ -24,6 +24,7 @@ export default function CalendarView() {
   const projects = useStore((s) => s.projects);
   const openDrawer = useStore((s) => s.openDrawer);
   const createItem = useStore((s) => s.createItem);
+  const updateItems = useStore((s) => s.updateItems);
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -54,15 +55,46 @@ export default function CalendarView() {
       start.setHours(0, 0, 0, 0);
       const end = new Date(days[days.length - 1]);
       end.setHours(23, 59, 59, 999);
-      const res = await fetchGoogleCalendarEvents(start, end);
-      setGcalEvents(res);
+      const res = await fetchGoogleCalendarEvents(start, end, (activeEvents) => {
+        const activeIds = new Set(activeEvents.map((e) => e.id));
+        const allItems = Object.values(useStore.getState().items);
+        const startMs = start.getTime();
+        const endMs = end.getTime();
+
+        const missingInWindow: ItemNode[] = [];
+        for (const it of allItems) {
+          const gId = it.schedule?.google_event_id;
+          if (!gId || activeIds.has(gId) || !it.schedule.start_time) continue;
+          const stMs = new Date(it.schedule.start_time).getTime();
+          if (stMs >= startMs && stMs <= endMs) {
+            missingInWindow.push(it);
+          }
+        }
+        if (missingInWindow.length > 0) {
+          updateItems(
+            missingInWindow.map((it) => ({
+              id: it.id,
+              patch: {
+                schedule: {
+                  ...it.schedule,
+                  start_time: null,
+                  end_time: null,
+                  google_event_id: null,
+                  google_event_link: null,
+                },
+              },
+            }))
+          );
+        }
+      });
+      setGcalEvents([...res]);
     } catch (e) {
       console.warn("[CalendarView] gcal fetch error:", e);
     } finally {
       setIsGcalLoading(false);
       setIsConnected(isGcalConnected());
     }
-  }, [days]);
+  }, [days, updateItems]);
 
   useEffect(() => {
     setIsConnected(isGcalConnected());
@@ -90,10 +122,15 @@ export default function CalendarView() {
     };
   }, [loadGcal]);
 
+  const activeGcalIdSet = useMemo(() => new Set(gcalEvents.map((e) => e.id)), [gcalEvents]);
+
   const byDay = useMemo(() => {
     const m = new Map<string, ItemNode[]>();
     for (const it of Object.values(items)) {
       if (!it.schedule.start_time) continue;
+      if (isConnected && it.schedule.google_event_id && !activeGcalIdSet.has(it.schedule.google_event_id)) {
+        continue;
+      }
       const k = dayKey(new Date(it.schedule.start_time));
       const arr = m.get(k) ?? [];
       arr.push(it);
@@ -101,12 +138,23 @@ export default function CalendarView() {
     }
     for (const arr of m.values()) arr.sort((a, b) => (a.schedule.start_time! < b.schedule.start_time! ? -1 : 1));
     return m;
+  }, [items, isConnected, activeGcalIdSet]);
+
+  const linkedItemGcalIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of Object.values(items)) {
+      if (it.schedule?.google_event_id && it.schedule?.start_time) {
+        set.add(it.schedule.google_event_id);
+      }
+    }
+    return set;
   }, [items]);
 
   const gcalByDay = useMemo(() => {
     const m = new Map<string, GoogleCalendarEvent[]>();
     for (const ge of gcalEvents) {
       if (!ge.start?.dateTime && !ge.start?.date) continue;
+      if (linkedItemGcalIds.has(ge.id)) continue;
       const d = new Date(ge.start.dateTime || `${ge.start.date}T00:00:00`);
       const k = dayKey(d);
       const arr = m.get(k) ?? [];
@@ -114,7 +162,7 @@ export default function CalendarView() {
       m.set(k, arr);
     }
     return m;
-  }, [gcalEvents]);
+  }, [gcalEvents, linkedItemGcalIds]);
 
   const shift = (n: number) => {
     setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + n, 1));

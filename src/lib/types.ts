@@ -29,6 +29,7 @@ export interface Schedule {
   start_time: string | null; // ISO datetime
   end_time: string | null; // ISO datetime
   google_event_id: string | null; // bidirectional mapping (Phase 3)
+  google_event_link?: string | null; // htmlLink to open event in Google Calendar
 }
 
 export type AttachmentKind = "drive" | "file" | "web";
@@ -74,6 +75,9 @@ export interface CanvasMeta {
   height?: number | null;
   recurrence?: RecurrenceMeta | null;
   deleted_at?: string | null;
+  completed_at?: string | null;
+  attendees?: string[] | null;
+  google_event_link?: string | null;
 }
 
 export interface ItemNode {
@@ -98,7 +102,11 @@ export interface ItemNode {
   last_recurred_at?: string | null;
   /** Soft-delete timestamp (ISO). When non-null, item is in the Trash (retained for 7 days). */
   deleted_at?: string | null;
+  /** Completion timestamp (ISO). Populated only on status transition to DONE going forward. */
+  completed_at?: string | null;
   schedule: Schedule;
+  /** List of participant / attendee email addresses. */
+  attendees?: string[];
   attachments: Attachment[];
   /** UUIDs of other linked ItemNodes. */
   links: string[];
