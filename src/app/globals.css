@@ -226,21 +226,37 @@ input, select, textarea {
   opacity: 1;
 }
 
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: inline-block;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 6px rgba(245, 158, 11, 0.25));
+}
+
+.brand-logo--lg {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 12px auto;
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 14px rgba(245, 158, 11, 0.3));
+}
+
 .brand-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #6366f1 0%, #ec4899 50%, #38bdf8 100%);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+  width: 32px;
+  height: 32px;
+  background: url("/logo.png") center / contain no-repeat;
   display: inline-block;
   flex-shrink: 0;
 }
 
 .brand-mark--lg {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  margin-bottom: 12px;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 12px auto;
+  display: block;
 }
 
 .brand-name em {
@@ -4219,6 +4235,216 @@ li[data-type="taskItem"] > div {
     color: #111827 !important;
   }
 }
+
+/* ==========================================================================
+   Modo Destaque / Foco Imediato na Tela "Hoje" (.task-card-active-focus)
+   ========================================================================== */
+
+@property --focus-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes task-focus-border-spin {
+  to {
+    --focus-border-angle: 360deg;
+  }
+}
+
+@keyframes task-focus-glow-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 12px rgba(249, 115, 22, 0.35),
+      inset 0 0 8px rgba(249, 115, 22, 0.08);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(249, 115, 22, 0.5),
+      inset 0 0 12px rgba(249, 115, 22, 0.14);
+  }
+}
+
+@keyframes task-focus-dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.65);
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.85;
+    box-shadow: 0 0 0 4px rgba(249, 115, 22, 0);
+  }
+}
+
+.task-card-active-focus {
+  position: relative;
+  border: 1.5px solid transparent !important;
+  background:
+    linear-gradient(var(--bg-card, #14171f), var(--bg-card, #14171f)) padding-box,
+    conic-gradient(
+      from var(--focus-border-angle),
+      rgba(249, 115, 22, 0.25),
+      rgba(249, 115, 22, 0.95),
+      rgba(245, 158, 11, 0.88),
+      rgba(249, 115, 22, 0.25)
+    ) border-box !important;
+  box-shadow:
+    0 0 12px rgba(249, 115, 22, 0.35),
+    inset 0 0 8px rgba(249, 115, 22, 0.08);
+  animation:
+    task-focus-border-spin 3.6s linear infinite,
+    task-focus-glow-pulse 2.4s ease-in-out infinite;
+  z-index: 1;
+}
+
+.notion-task-row.task-card-active-focus {
+  padding: 6px 8px;
+  margin: 2px 0;
+  border-radius: 8px;
+}
+
+.task-focus-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #fb923c;
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+.task-focus-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f97316;
+  display: inline-block;
+  flex-shrink: 0;
+  animation: task-focus-dot-pulse 1.6s ease-in-out infinite;
+}
+
+.task-focus-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.notion-task-row:hover .task-focus-btn,
+.card:hover .task-focus-btn,
+.task-focus-btn.is-active {
+  opacity: 1;
+}
+
+.task-focus-btn:hover {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.3);
+}
+
+.task-focus-btn.is-active {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.16);
+  border-color: rgba(249, 115, 22, 0.45);
+}
+
+.task-focus-clear-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fb923c;
+  background: rgba(249, 115, 22, 0.1);
+  border: 1px solid rgba(249, 115, 22, 0.32);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.task-focus-clear-pill:hover {
+  background: rgba(249, 115, 22, 0.18);
+  border-color: rgba(249, 115, 22, 0.5);
+}
+
+/* ==========================================================================
+   Quick Add Inline no Rodapé das Colunas do Kanban
+   ========================================================================== */
+
+.column-quick-add-wrap {
+  margin-top: 4px;
+}
+
+.column-quick-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed transparent;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.column-quick-add-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.column-quick-add-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--accent, var(--border));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.column-quick-add-input {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text-main);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.column-quick-add-input::placeholder {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+
 
 
 

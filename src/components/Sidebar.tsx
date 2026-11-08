@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -909,7 +910,14 @@ export default function Sidebar() {
         <aside className="sidebar" aria-hidden={sidebarCollapsed && !hoverPeek}>
           <div className="brand-row">
             <Link href="/today" className="brand">
-              <span className="brand-mark" />
+              <Image
+                src="/logo.png"
+                alt="Ayolia"
+                width={34}
+                height={34}
+                className="brand-logo"
+                priority
+              />
               <span className="brand-name">ayolia</span>
             </Link>
             <button

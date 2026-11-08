@@ -12,7 +12,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarClock, FileText, ListChecks, Paperclip, Link2, Plus, Repeat, Sunrise } from "lucide-react";
+import { CalendarClock, FileText, ListChecks, Paperclip, Link2, Plus, Repeat, Sunrise, Zap } from "lucide-react";
 import { checklistProgress, formatRecurrenceSummary, useStore } from "@/lib/store";
 import { STATUS_LABEL } from "@/lib/types";
 import type { ItemNode, Status } from "@/lib/types";
@@ -27,6 +27,8 @@ export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean 
   const projects = useStore((s) => s.projects);
   const updateItem = useStore((s) => s.updateItem);
   const openDrawer = useStore((s) => s.openDrawer);
+  const isFocused = useStore((s) => s.focusedTaskIds.includes(item.id));
+  const toggleTaskFocus = useStore((s) => s.toggleTaskFocus);
   const prog = checklistProgress(item.content);
 
   const handlePageAction = (e: React.MouseEvent) => {
@@ -53,9 +55,20 @@ export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean 
 
   return (
     <div
-      className={`card ${overlay ? "is-overlay" : ""} ${item.status === "DONE" ? "is-done" : ""}`}
+      className={`card ${overlay ? "is-overlay" : ""} ${item.status === "DONE" ? "is-done" : ""} ${
+        isFocused ? "task-card-active-focus" : ""
+      }`}
       style={{ ["--accent" as string]: project?.color ?? "var(--muted)" }}
-      onClick={() => !overlay && openDrawer(item.id)}
+      onClick={(e) => {
+        if (overlay) return;
+        if (e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleTaskFocus(item.id);
+          return;
+        }
+        openDrawer(item.id);
+      }}
       id={`card-${item.id}`}
     >
       <div className="card-top">
@@ -72,6 +85,17 @@ export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean 
           )}
         </span>
         <button
+          type="button"
+          className={`task-focus-btn ${isFocused ? "is-active" : ""}`}
+          title={isFocused ? "Remover destaque de foco (Alt + Clique)" : "Destacar em foco (Alt + Clique)"}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleTaskFocus(item.id);
+          }}
+        >
+          <Zap size={12} />
+        </button>
+        <button
           className="card-page-btn"
           title={item.type === "PAGE" ? "Abrir página" : "Criar subpágina vinculada ao projeto"}
           onClick={handlePageAction}
@@ -81,6 +105,12 @@ export function ItemCard({ item, overlay }: { item: ItemNode; overlay?: boolean 
       </div>
       {parent && <div className="card-parent">↳ {parent.title || "Sem título"}</div>}
       <div className="card-meta">
+        {isFocused && (
+          <span className="task-focus-badge" title="Tarefa em foco imediato">
+            <span className="task-focus-dot" />
+            Em foco
+          </span>
+        )}
         {project && (
           <span className="meta-chip">
             <span className="project-dot" style={{ background: project.color }} /> {project.name}
@@ -121,15 +151,32 @@ function Column({
   status,
   items,
   onAdd,
+  onQuickAdd,
   showHeader,
 }: {
   dropId: string;
   status: Status;
   items: ItemNode[];
   onAdd?: () => void;
+  onQuickAdd?: (title: string) => void;
   showHeader: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: dropId });
+  const [isCreating, setIsCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+
+  const handleQuickSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      setIsCreating(false);
+      setNewTitle("");
+      return;
+    }
+    onQuickAdd?.(trimmed);
+    setNewTitle("");
+  };
+
   return (
     <div ref={setNodeRef} className={`column status-col-${status} ${isOver ? "is-over" : ""}`}>
       {showHeader && (
@@ -138,7 +185,7 @@ function Column({
           <span>{STATUS_LABEL[status]}</span>
           <span className="muted">{items.length}</span>
           {onAdd && (
-            <button className="icon-btn column-add" title="Adicionar" onClick={onAdd}>
+            <button className="icon-btn column-add" title="Adicionar e abrir detalhes" onClick={onAdd}>
               <Plus size={14} />
             </button>
           )}
@@ -148,7 +195,44 @@ function Column({
         {items.map((it) => (
           <DraggableCard key={it.id} item={it} />
         ))}
-        {items.length === 0 && <div className="column-empty">Solte aqui</div>}
+        {items.length === 0 && !isCreating && <div className="column-empty">Solte aqui</div>}
+
+        {onQuickAdd && (
+          <div className="column-quick-add-wrap">
+            {isCreating ? (
+              <form onSubmit={handleQuickSubmit} className="column-quick-add-form">
+                <span className={`status-dot status-${status}`} />
+                <input
+                  autoFocus
+                  className="column-quick-add-input"
+                  placeholder="Nome da tarefa (Enter para salvar)..."
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  onBlur={() => {
+                    setIsCreating(false);
+                    setNewTitle("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setIsCreating(false);
+                      setNewTitle("");
+                    }
+                  }}
+                />
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="column-quick-add-btn"
+                onClick={() => setIsCreating(true)}
+              >
+                <Plus size={13} />
+                <span>Nova tarefa</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -169,11 +253,12 @@ interface BoardProps {
   lanes?: Lane[]; // swimlanes (grouped by project)
   onMove: (id: string, status: Status, laneId: string | null) => void;
   onAdd?: (status: Status, laneId: string | null) => void;
+  onQuickAdd?: (title: string, status: Status, laneId: string | null) => void;
 }
 
 const SEP = "::";
 
-export default function KanbanBoard({ items, statuses, lanes, onMove, onAdd }: BoardProps) {
+export default function KanbanBoard({ items, statuses, lanes, onMove, onAdd, onQuickAdd }: BoardProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const [activeId, setActiveId] = useState<string | null>(null);
   const active = activeId ? items.find((i) => i.id === activeId) : null;
@@ -209,6 +294,11 @@ export default function KanbanBoard({ items, statuses, lanes, onMove, onAdd }: B
           showHeader={header}
           items={grouped.get(`${laneId}${SEP}${s}`) ?? []}
           onAdd={onAdd ? () => onAdd(s, lanes ? (laneId === "none" ? null : laneId) : null) : undefined}
+          onQuickAdd={
+            onQuickAdd
+              ? (title) => onQuickAdd(title, s, lanes ? (laneId === "none" ? null : laneId) : null)
+              : undefined
+          }
         />
       ))}
     </div>

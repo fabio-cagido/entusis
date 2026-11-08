@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -105,7 +106,14 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   if (!ready)
     return (
       <div className="splash">
-        <div className="brand-mark brand-mark--lg" />
+        <Image
+          src="/logo.png"
+          alt="Ayolia"
+          width={68}
+          height={68}
+          className="brand-logo brand-logo--lg"
+          priority
+        />
         <p>Carregando seus nós…</p>
       </div>
     );

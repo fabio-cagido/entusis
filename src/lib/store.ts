@@ -234,6 +234,7 @@ interface State {
   syncError: string | null;
   sidebarCollapsed: boolean;
   todayTaskFilter: TodayTaskFilter;
+  focusedTaskIds: string[];
 
   init(repo?: Repository): Promise<void>;
   ensureProjectKanbanBranch(projectId: string): void;
@@ -268,6 +269,8 @@ interface State {
   toggleSidebar(): void;
   setSidebarCollapsed(collapsed: boolean): void;
   setTodayTaskFilter(filter: TodayTaskFilter): void;
+  toggleTaskFocus(id: string): void;
+  clearFocusedTasks(): void;
   applyRemote(c: RemoteChange): void;
 }
 
@@ -404,6 +407,7 @@ export const useStore = create<State>((set, get) => {
     favorites: [],
     sidebarCollapsed: false,
     todayTaskFilter: "doing",
+    focusedTaskIds: [],
 
     async init(repo) {
       if (initPromise) {
@@ -440,6 +444,19 @@ export const useStore = create<State>((set, get) => {
             if (rawFavs) favs = JSON.parse(rawFavs);
           } catch {
             favs = [];
+          }
+
+          let focusedIds: string[] = [];
+          try {
+            const rawFocused = typeof window !== "undefined" ? localStorage.getItem("ayolia_focused_task_ids") : null;
+            if (rawFocused) {
+              const parsed = JSON.parse(rawFocused);
+              if (Array.isArray(parsed)) {
+                focusedIds = parsed.filter((x): x is string => typeof x === "string");
+              }
+            }
+          } catch {
+            focusedIds = [];
           }
 
           let archivedSet: Set<string> | null = null;
@@ -612,6 +629,7 @@ export const useStore = create<State>((set, get) => {
             theme,
             sidebarCollapsed,
             todayTaskFilter,
+            focusedTaskIds: focusedIds.filter((id) => Boolean(itemsMap[id])),
             favorites: favs,
             items: itemsMap,
             trashedItems: trashedMap,
@@ -747,12 +765,21 @@ export const useStore = create<State>((set, get) => {
           null;
 
         if (!resolvedParentId || resolvedParentId === projRootId) {
-          const statusNode = findProjectKanbanStatusNode(
+          let statusNode = findProjectKanbanStatusNode(
             state.items,
             resolvedProjectId,
             resolvedStatus,
             projRootId
           );
+          if (!statusNode) {
+            get().ensureProjectKanbanBranch(resolvedProjectId);
+            statusNode = findProjectKanbanStatusNode(
+              get().items,
+              resolvedProjectId,
+              resolvedStatus,
+              projRootId
+            );
+          }
           if (statusNode) {
             resolvedParentId = statusNode.id;
             if (!resolvedCanvas && statusNode.canvas) {
@@ -1321,6 +1348,30 @@ export const useStore = create<State>((set, get) => {
         localStorage.setItem("entusis_today_task_filter", normalized);
       }
       set({ todayTaskFilter: normalized });
+    },
+
+    toggleTaskFocus(id) {
+      const cur = get().focusedTaskIds;
+      const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("ayolia_focused_task_ids", JSON.stringify(next));
+        } catch {
+          // ignore storage errors
+        }
+      }
+      set({ focusedTaskIds: next });
+    },
+
+    clearFocusedTasks() {
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.removeItem("ayolia_focused_task_ids");
+        } catch {
+          // ignore storage errors
+        }
+      }
+      set({ focusedTaskIds: [] });
     },
 
     applyRemote(c) {

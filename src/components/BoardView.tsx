@@ -253,6 +253,15 @@ export default function BoardView() {
                   });
                   openDrawer(n.id);
                 }}
+                onQuickAdd={(title, status, laneId) => {
+                  createItem({
+                    title,
+                    type: "TASK",
+                    status,
+                    parent_id: projectPage.id,
+                    project_id: laneId ?? projectId,
+                  });
+                }}
               />
             </div>
           </div>
@@ -274,6 +283,15 @@ export default function BoardView() {
               });
               openDrawer(n.id);
             }}
+            onQuickAdd={(title, status, laneId) => {
+              createItem({
+                title,
+                type: "TASK",
+                status,
+                parent_id: projectPage ? projectPage.id : null,
+                project_id: laneId ?? projectId,
+              });
+            }}
           />
         )
       ) : (
@@ -294,6 +312,15 @@ export default function BoardView() {
               project_id: laneId ?? projectId ?? root?.project_id ?? null,
             });
             openDrawer(n.id);
+          }}
+          onQuickAdd={(title, status, laneId) => {
+            createItem({
+              title,
+              type: "TASK",
+              status,
+              parent_id: root?.id ?? null,
+              project_id: laneId ?? projectId ?? root?.project_id ?? null,
+            });
           }}
         />
       )}

@@ -7,6 +7,14 @@ import NodeDrawer from "@/components/NodeDrawer";
 export const metadata: Metadata = {
   title: "ayolia — Plataforma Integrada de Produtividade",
   description: "Notion + Miro + Google Calendar em uma única base unificada de dados.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/logo.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/logo.png",
+  },
 };
 
 // Opts out of development-only instant-navigation validator

@@ -16,6 +16,7 @@ import {
   Search,
   Sparkles,
   X,
+  Zap,
 } from "lucide-react";
 import { formatRecurrenceSummary, isToday, useStore } from "@/lib/store";
 import type { ItemNode, Project, Status } from "@/lib/types";
@@ -45,6 +46,8 @@ function ProjectViewCard({
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const focusedTaskIds = useStore((s) => s.focusedTaskIds);
+  const toggleTaskFocus = useStore((s) => s.toggleTaskFocus);
 
   const filteredItems = useMemo(() => {
     let result = items;
@@ -215,37 +218,67 @@ function ProjectViewCard({
 
       {/* Lista ultra compacta de tarefas */}
       <div className="notion-task-list">
-        {filteredItems.map((item) => (
-          <div
-            key={item.id}
-            className={`notion-task-row ${item.status === "DONE" ? "is-done" : ""}`}
-            onClick={() => onOpenDrawer(item.id)}
-          >
-            <button
-              className="notion-task-check"
-              onClick={(e) => cycleStatus(e, item)}
+        {filteredItems.map((item) => {
+          const isFocused = focusedTaskIds.includes(item.id);
+          return (
+            <div
+              key={item.id}
+              className={`notion-task-row ${item.status === "DONE" ? "is-done" : ""} ${
+                isFocused ? "task-card-active-focus" : ""
+              }`}
+              onClick={(e) => {
+                if (e.altKey) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleTaskFocus(item.id);
+                  return;
+                }
+                onOpenDrawer(item.id);
+              }}
             >
-              {statusIcon(item.status)}
-            </button>
-            <span className="notion-task-title">
-              {item.title || "Sem título"}
-              {item.is_recurring && (
-                <span
-                  className="recurring-indicator"
-                  title={formatRecurrenceSummary(item) ?? "Tarefa recorrente"}
-                >
-                  <Repeat size={11} />
+              <button
+                className="notion-task-check"
+                onClick={(e) => cycleStatus(e, item)}
+              >
+                {statusIcon(item.status)}
+              </button>
+              <span className="notion-task-title">
+                {item.title || "Sem título"}
+                {item.is_recurring && (
+                  <span
+                    className="recurring-indicator"
+                    title={formatRecurrenceSummary(item) ?? "Tarefa recorrente"}
+                  >
+                    <Repeat size={11} />
+                  </span>
+                )}
+              </span>
+              {isFocused && (
+                <span className="task-focus-badge" title="Tarefa em foco imediato">
+                  <span className="task-focus-dot" />
+                  Em foco
                 </span>
               )}
-            </span>
-            {item.schedule.start_time && (
-              <span className="notion-task-time">
-                <Clock size={10} />
-                {new Date(item.schedule.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            )}
-          </div>
-        ))}
+              {item.schedule.start_time && (
+                <span className="notion-task-time">
+                  <Clock size={10} />
+                  {new Date(item.schedule.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+              <button
+                type="button"
+                className={`task-focus-btn ${isFocused ? "is-active" : ""}`}
+                title={isFocused ? "Remover destaque de foco (Alt + Clique)" : "Destacar em foco (Alt + Clique)"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleTaskFocus(item.id);
+                }}
+              >
+                <Zap size={12} />
+              </button>
+            </div>
+          );
+        })}
 
         {filteredItems.length === 0 && !isCreating && (
           <div className="notion-empty-row">
@@ -299,6 +332,8 @@ export default function TodayView() {
   const checkRecurringTasks = useStore((s) => s.checkRecurringTasks);
   const globalFilter = useStore((s) => s.todayTaskFilter);
   const setGlobalFilter = useStore((s) => s.setTodayTaskFilter);
+  const focusedTaskIds = useStore((s) => s.focusedTaskIds);
+  const clearFocusedTasks = useStore((s) => s.clearFocusedTasks);
 
   useEffect(() => {
     checkRecurringTasks();
@@ -397,6 +432,21 @@ export default function TodayView() {
         <h1 className="notion-main-title">To do Today</h1>
 
         <div className="notion-top-actions">
+          {focusedTaskIds.length > 0 && (
+            <button
+              type="button"
+              className="task-focus-clear-pill"
+              onClick={clearFocusedTasks}
+              title="Limpar todas as tarefas em foco (ou use Alt + Clique em uma tarefa)"
+            >
+              <span className="task-focus-dot" />
+              <span>
+                {focusedTaskIds.length} {focusedTaskIds.length === 1 ? "em foco" : "em foco"}
+              </span>
+              <X size={11} />
+            </button>
+          )}
+
           {/* Alternador Global Rápido: Todas x Fazendo */}
           <div className="segmented segmented-sm">
             <button
@@ -487,6 +537,15 @@ export default function TodayView() {
                 is_today: true,
               });
               openDrawer(n.id);
+            }}
+            onQuickAdd={(title, status, laneId) => {
+              createItem({
+                title,
+                type: "TASK",
+                status,
+                project_id: laneId,
+                is_today: true,
+              });
             }}
           />
         </div>
