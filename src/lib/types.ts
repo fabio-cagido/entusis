@@ -91,6 +91,11 @@ export interface SubmapCanvasData {
   edges: SubmapEdgeItem[];
 }
 
+export interface LinkHandleMeta {
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
 export interface CanvasMeta {
   x: number;
   y: number;
@@ -105,6 +110,8 @@ export interface CanvasMeta {
   google_event_link?: string | null;
   submap_canvas_data?: SubmapCanvasData | null;
   scope_node_id?: string | null;
+  custom_pos?: boolean | null;
+  link_handles?: Record<string, LinkHandleMeta> | null;
 }
 
 export interface ItemNode {
