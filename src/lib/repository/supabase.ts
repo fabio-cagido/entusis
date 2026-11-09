@@ -282,15 +282,16 @@ export class SupabaseRepository implements Repository {
 
   constructor(private client: SupabaseClient, private userId: string) {}
 
-  private async fetchAllRows<T>(table: string): Promise<T[]> {
+  private async fetchAllRows<T>(table: string, ownerOnly = false): Promise<T[]> {
     const allRows: T[] = [];
     let from = 0;
 
     while (true) {
       const to = from + SupabaseRepository.PAGE_SIZE - 1;
-      const { data, error } = await this.client
-        .from(table)
-        .select("*")
+      let query = this.client.from(table).select("*");
+      // Isolamento rigoroso por dono (além do RLS): projetos só do usuário logado
+      if (ownerOnly) query = query.eq("user_id", this.userId);
+      const { data, error } = await query
         .order("created_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to);
@@ -311,7 +312,7 @@ export class SupabaseRepository implements Repository {
   async loadAll(): Promise<Snapshot> {
     const [itemRows, projectRows, shareRows] = await Promise.all([
       this.fetchAllRows<ItemRow>("item_nodes"),
-      this.fetchAllRows<Project>("projects"),
+      this.fetchAllRows<Project>("projects", true),
       this.fetchAllRows<ItemShare>("item_node_shares").catch(() => [] as ItemShare[]),
     ]);
     return {

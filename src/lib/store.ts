@@ -5,7 +5,7 @@ import type { ItemNode, ItemShare, Project, Status } from "./types";
 import { WEEKDAY_LABEL } from "./types";
 import type { Repository, RemoteChange } from "./repository/types";
 import { LocalRepository } from "./repository/local";
-import { buildSeed, newItem } from "./seed";
+import { buildSeed, buildWelcomeSeed, newItem } from "./seed";
 
 type Theme = "system" | "light" | "dark";
 type SyncState = "idle" | "saving" | "error";
@@ -445,7 +445,8 @@ export const useStore = create<State>((set, get) => {
           let snap = await r.loadAll();
 
           if (snap.items.length === 0 && snap.projects.length === 0) {
-            snap = buildSeed();
+            // Contas novas no Supabase recebem apenas a página de boas-vindas (sem dados demo de outros projetos)
+            snap = r.kind === "supabase" ? buildWelcomeSeed() : buildSeed();
             await r.upsertProjects(snap.projects);
             await r.upsertItems(snap.items);
           }

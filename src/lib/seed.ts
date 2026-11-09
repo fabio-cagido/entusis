@@ -122,3 +122,22 @@ export function buildSeed(): { items: ItemNode[]; projects: Project[] } {
 export function newItem(p: Partial<ItemNode>): ItemNode {
   return item({ title: "", ...p });
 }
+
+/**
+ * Seed mínimo para contas novas autenticadas (Supabase): apenas a página de boas-vindas,
+ * sem projetos nem dados de demonstração (ex.: "Rede Cruzada").
+ */
+export function buildWelcomeSeed(): { items: ItemNode[]; projects: Project[] } {
+  const welcome = item({
+    title: "Bem-vindo ao Ayolia",
+    icon: "👋",
+    sort_order: 0,
+    content:
+      "<h2>Tudo é um nó</h2><p>Páginas, tarefas, eventos e ramos de mapa mental compartilham a mesma base. " +
+      "Alterne entre <strong>Página</strong>, <strong>Mapa</strong> e <strong>Kanban</strong> no topo de qualquer item.</p>" +
+      '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Criar seu primeiro projeto</p></li>' +
+      '<li data-type="taskItem" data-checked="false"><p>Criar seu primeiro mapa mental</p></li>' +
+      '<li data-type="taskItem" data-checked="false"><p>Criar sua primeira subpágina</p></li></ul>',
+  });
+  return { items: [welcome], projects: [] };
+}
