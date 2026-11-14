@@ -74,6 +74,7 @@ function NotionActionMenu({
   const projects = useStore((s) => s.projects);
   const createItem = useStore((s) => s.createItem);
   const updateProject = useStore((s) => s.updateProject);
+  const toggleProjectArchived = useStore((s) => s.toggleProjectArchived);
   const openShareModal = useStore((s) => s.openShareModal);
   const items = useStore((s) => s.items);
 
@@ -284,14 +285,17 @@ function NotionActionMenu({
           onClick={() => {
             const pr = projects[target.id];
             if (!pr) return;
-            const nextArchived = !pr.is_archived;
-            updateProject(pr.id, { is_archived: nextArchived });
-            onShowToast(
-              nextArchived
-                ? `Projeto "${pr.name}" arquivado`
-                : `Projeto "${pr.name}" desarquivado`
-            );
+            const prevArchived = Boolean(pr.is_archived);
             onClose();
+            void toggleProjectArchived(pr.id).then((finalStatus) => {
+              if (finalStatus !== prevArchived) {
+                onShowToast(
+                  finalStatus
+                    ? `Projeto "${pr.name}" arquivado`
+                    : `Projeto "${pr.name}" desarquivado`
+                );
+              }
+            });
           }}
         >
           <span className="notion-menu-icon">
@@ -509,7 +513,7 @@ function ProjectList({
 
   const list = useMemo(() => Object.values(projects).sort((a, b) => a.sort_order - b.sort_order), [projects]);
   const activeProjects = useMemo(() => list.filter((p) => !p.is_archived), [list]);
-  const archivedProjects = useMemo(() => list.filter((p) => p.is_archived), [list]);
+  const archivedProjects = useMemo(() => list.filter((p) => p.is_archived === true), [list]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};

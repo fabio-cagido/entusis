@@ -317,7 +317,10 @@ export class SupabaseRepository implements Repository {
     ]);
     return {
       items: itemRows.map(fromRow),
-      projects: projectRows,
+      projects: projectRows.map((p) => ({
+        ...p,
+        is_archived: Boolean(p.is_archived),
+      })),
       shares: shareRows,
       currentUserId: this.userId,
     };

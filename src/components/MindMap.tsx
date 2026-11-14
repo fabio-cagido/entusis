@@ -788,17 +788,31 @@ const CustomLinkEdge = memo(function CustomLinkEdge({
   style,
   markerEnd,
   selected,
+  data,
 }: EdgeProps<Edge>) {
   const ctx = useContext(MindCtx);
+  const connectionIndex =
+    typeof data?.connectionIndex === "number" ? data.connectionIndex : 0;
+  const sourceFanOffset =
+    typeof data?.sourceFanOffset === "number" ? data.sourceFanOffset : 0;
+  const targetFanOffset =
+    typeof data?.targetFanOffset === "number" ? data.targetFanOffset : 0;
+
+  // Escalonamento dinâmico de trilhos para evitar sobreposição de linhas tracejadas paralelas
+  const stepOffset = 24 + (connectionIndex % 8) * 10;
+  const stepBorderRadius = 14 + (connectionIndex % 4) * 3;
+  const stepPosition = 0.32 + (connectionIndex % 7) * 0.06;
+
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
-    sourceY,
+    sourceY: sourceY + sourceFanOffset,
     sourcePosition,
     targetX,
-    targetY,
+    targetY: targetY + targetFanOffset,
     targetPosition,
-    borderRadius: 20,
-    offset: 24,
+    borderRadius: stepBorderRadius,
+    offset: stepOffset,
+    stepPosition,
   });
 
   return (
@@ -849,7 +863,6 @@ const edgeTypes = { customLink: CustomLinkEdge };
 interface SavedMapState {
   collapsedIds?: string[];
   viewport?: { x: number; y: number; zoom: number };
-  customPositionedIds?: string[];
 }
 
 function getMapStateStorageKey(mapId: string): string {
@@ -890,7 +903,6 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const updateItem = useStore((s) => s.updateItem);
   const updateItems = useStore((s) => s.updateItems);
   const deleteItem = useStore((s) => s.deleteItem);
-  const toggleLink = useStore((s) => s.toggleLink);
   const openDrawer = useStore((s) => s.openDrawer);
   const ensureProjectKanbanBranch = useStore((s) => s.ensureProjectKanbanBranch);
   const rf = useReactFlow();
@@ -902,19 +914,6 @@ function MindMapInner({ rootId }: { rootId: string }) {
     const saved = loadSavedMapState(rootId);
     return new Set(Array.isArray(saved?.collapsedIds) ? saved!.collapsedIds : []);
   });
-  const customPosRef = useRef<Set<string>>(
-    new Set(Array.isArray(loadSavedMapState(rootId)?.customPositionedIds) ? loadSavedMapState(rootId)!.customPositionedIds : []),
-  );
-  const isNodeCustomPositioned = useCallback((id: string, item?: ItemNode): boolean => {
-    return customPosRef.current.has(id) || Boolean(item?.canvas?.custom_pos);
-  }, []);
-  const markNodeCustomPositioned = useCallback(
-    (id: string) => {
-      customPosRef.current.add(id);
-      saveMapStatePatch(rootId, { customPositionedIds: Array.from(customPosRef.current) });
-    },
-    [rootId],
-  );
   const [nodes, setNodes] = useState<(MindNode | ProcessNode)[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<Set<string>>(new Set());
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -931,7 +930,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
   const dimensionsRef = useRef<Map<string, NodeDimensions>>(new Map());
   const relayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ---- Drag to reorder & reparent state ---- */
+  /* ---- Estado de Arraste Estrutural (Reordenar entre irmãos / Reaninhar sobre nó alvo) ---- */
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -1102,9 +1101,6 @@ function MindMapInner({ rootId }: { rootId: string }) {
   useEffect(() => {
     const saved = loadSavedMapState(rootId);
     setCollapsed(new Set(Array.isArray(saved?.collapsedIds) ? saved!.collapsedIds : []));
-    customPosRef.current = new Set(
-      Array.isArray(saved?.customPositionedIds) ? saved!.customPositionedIds : [],
-    );
   }, [rootId]);
 
   useEffect(() => {
@@ -1140,19 +1136,38 @@ function MindMapInner({ rootId }: { rootId: string }) {
     };
   }, [rootId]);
 
-  /* ---- first open: lay out only unplaced mind tree nodes without moving already-placed nodes ---- */
+  /* ---- Motor de Auto-Layout Bilateral Determinístico: recalcula e alinha todos os nós visíveis ---- */
   useEffect(() => {
-    if (!root) return;
-    const unplaced = mindScope.filter((s) => !s.canvas);
-    if (!unplaced.length) return;
+    if (!root || !mindScope.length) return;
     const pos = layoutTree(mindScope, rootId, collapsed, dimensionsRef.current);
-    updateItems(
-      unplaced.map((s) => ({
-        id: s.id,
-        patch: { canvas: { color: s.canvas?.color ?? null, ...(pos[s.id] ?? { x: 0, y: 0 }) } },
-      })),
-    );
-  }, [mindScope, root, rootId, collapsed, updateItems]);
+    const patches: { id: string; patch: Partial<ItemNode> }[] = [];
+    for (const [id, p] of Object.entries(pos)) {
+      if (isSubmap && id === rootId) continue;
+      const cur = items[id];
+      if (!cur) continue;
+      if (
+        !cur.canvas ||
+        Math.abs(cur.canvas.x - p.x) > 1 ||
+        Math.abs(cur.canvas.y - p.y) > 1 ||
+        cur.canvas.custom_pos
+      ) {
+        patches.push({
+          id,
+          patch: {
+            canvas: {
+              ...(cur.canvas ?? { color: null }),
+              x: p.x,
+              y: p.y,
+              custom_pos: false,
+            },
+          },
+        });
+      }
+    }
+    if (patches.length > 0) {
+      updateItems(patches);
+    }
+  }, [mindScope, root, rootId, isSubmap, collapsed, items, updateItems]);
 
   /* ---- Centralização suave (setCenter) e destaque âmbar ao retornar de um submapa (?focusNode=...) ---- */
   useEffect(() => {
@@ -1208,7 +1223,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
     };
   }, [focusNodeId, root, rootId, scopedItems, items, nodes, rf]);
 
-  /* ---- Relayout dinâmico quando dimensões mudam (ex: texto multilinhas) ---- */
+  /* ---- Relayout dinâmico quando dimensões reais do DOM mudam (ex: texto multilinhas ou badges) ---- */
   const scheduleRelayout = useCallback(() => {
     if (relayoutTimerRef.current) clearTimeout(relayoutTimerRef.current);
     relayoutTimerRef.current = setTimeout(() => {
@@ -1233,16 +1248,39 @@ function MindMapInner({ rootId }: { rootId: string }) {
       for (const [id, p] of Object.entries(pos)) {
         if (isSubmap && id === rootId) continue;
         const cur = currentItems[id];
-        if (isNodeCustomPositioned(id, cur)) continue;
         if (cur?.canvas && (Math.abs(cur.canvas.x - p.x) > 1 || Math.abs(cur.canvas.y - p.y) > 1)) {
-          patches.push({ id, patch: { canvas: { ...cur.canvas, x: p.x, y: p.y } } });
+          patches.push({
+            id,
+            patch: { canvas: { ...cur.canvas, x: p.x, y: p.y, custom_pos: false } },
+          });
         }
       }
       if (patches.length > 0) {
         updateItems(patches);
       }
     }, 60);
-  }, [rootId, activeScopeId, isSubmap, collapsed, isNodeCustomPositioned, updateItems]);
+  }, [rootId, activeScopeId, isSubmap, collapsed, updateItems]);
+
+  /* ---- Determina o lado (direito = 1, esquerdo = -1) de qualquer nó subindo até o filho direto da raiz ---- */
+  const getBranchSide = useCallback(
+    (nodeId: string, scopeMap: Record<string, ItemNode>): 1 | -1 => {
+      const rootX = root?.canvas?.x ?? 0;
+      let cur: ItemNode | undefined = scopeMap[nodeId] ?? items[nodeId];
+      let guard = 0;
+      while (cur && cur.parent_id && cur.parent_id !== rootId && guard++ < 100) {
+        cur = scopeMap[cur.parent_id] ?? items[cur.parent_id];
+      }
+      if (!cur || cur.id === rootId) return 1;
+      if (
+        (cur.canvas?.x ?? rootX + 1) < rootX ||
+        cur.title?.trim().toLowerCase() === "contexto"
+      ) {
+        return -1;
+      }
+      return 1;
+    },
+    [items, root?.canvas?.x, rootId],
+  );
 
   /* ---- derived colors and child counts ---- */
   const colorOf = useCallback(
@@ -1277,6 +1315,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         .map<MindNode>((it) => ({
           id: it.id,
           type: "mind",
+          draggable: it.id !== rootId,
           position:
             activeDragId === it.id && prevPosMap.has(it.id)
               ? prevPosMap.get(it.id)!
@@ -1304,6 +1343,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         .map<ProcessNode>((it) => ({
           id: it.id,
           type: "process",
+          draggable: true,
           position:
             activeDragId === it.id && prevPosMap.has(it.id)
               ? prevPosMap.get(it.id)!
@@ -1357,6 +1397,18 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
     // Links manuais e conexões de fluxo entre nós (selecionáveis, excluíveis e reconectáveis)
     const rootX = root?.canvas?.x ?? 0;
+    const rawCustomEdges: {
+      edgeId: string;
+      source: string;
+      target: string;
+      sourceHandle?: string;
+      targetHandle?: string;
+      isProcess: boolean;
+      isSelected: boolean;
+      targetItem?: ItemNode;
+      sourceItem: ItemNode;
+    }[] = [];
+
     for (const it of [...visibleMind, ...processScope]) {
       for (const l of it.links) {
         if (!allVis.has(l)) continue;
@@ -1427,55 +1479,93 @@ function MindMapInner({ rootId }: { rootId: string }) {
         const edgeId = `l-${it.id}-${l}`;
         const isSelected = selectedEdgeIds.has(edgeId);
 
-        out.push({
-          id: edgeId,
+        rawCustomEdges.push({
+          edgeId,
           source: it.id,
           target: l,
           sourceHandle,
           targetHandle,
-          type: "customLink",
-          selectable: true,
-          deletable: true,
-          reconnectable: true,
-          focusable: true,
-          selected: isSelected,
-          interactionWidth: 20,
-          animated: !isProcess,
-          markerEnd: isProcess
-            ? {
-                type: MarkerType.ArrowClosed,
-                width: 15,
-                height: 15,
-                color: isSelected ? "#fbbf24" : colorOf(targetItem || it),
-              }
-            : undefined,
-          style: {
-            stroke: isSelected ? "#fde047" : isProcess ? colorOf(targetItem || it) : "#f59e0b",
-            strokeWidth: isSelected ? 3.2 : 2,
-          },
-          data: { link: true },
+          isProcess,
+          isSelected,
+          targetItem,
+          sourceItem: it,
         });
       }
     }
 
+    // Calcula fan-out por handle para evitar que múltiplas conexões no mesmo nó colem horizontalmente
+    const sourceHandleGroups = new Map<string, string[]>();
+    const targetHandleGroups = new Map<string, string[]>();
+    for (const ce of rawCustomEdges) {
+      const sKey = `${ce.source}:${ce.sourceHandle ?? ""}`;
+      const tKey = `${ce.target}:${ce.targetHandle ?? ""}`;
+      sourceHandleGroups.set(sKey, [...(sourceHandleGroups.get(sKey) ?? []), ce.edgeId]);
+      targetHandleGroups.set(tKey, [...(targetHandleGroups.get(tKey) ?? []), ce.edgeId]);
+    }
+
+    rawCustomEdges.forEach((ce, connectionIndex) => {
+      const sKey = `${ce.source}:${ce.sourceHandle ?? ""}`;
+      const tKey = `${ce.target}:${ce.targetHandle ?? ""}`;
+      const sGroup = sourceHandleGroups.get(sKey) ?? [ce.edgeId];
+      const tGroup = targetHandleGroups.get(tKey) ?? [ce.edgeId];
+      const sIdx = sGroup.indexOf(ce.edgeId);
+      const tIdx = tGroup.indexOf(ce.edgeId);
+      const sourceFanOffset = sGroup.length > 1 ? Math.round((sIdx - (sGroup.length - 1) / 2) * 5) : 0;
+      const targetFanOffset = tGroup.length > 1 ? Math.round((tIdx - (tGroup.length - 1) / 2) * 5) : 0;
+
+      out.push({
+        id: ce.edgeId,
+        source: ce.source,
+        target: ce.target,
+        sourceHandle: ce.sourceHandle,
+        targetHandle: ce.targetHandle,
+        type: "customLink",
+        selectable: true,
+        deletable: true,
+        reconnectable: true,
+        focusable: true,
+        selected: ce.isSelected,
+        interactionWidth: 20,
+        animated: !ce.isProcess,
+        markerEnd: ce.isProcess
+          ? {
+              type: MarkerType.ArrowClosed,
+              width: 15,
+              height: 15,
+              color: ce.isSelected ? "#fbbf24" : colorOf(ce.targetItem || ce.sourceItem),
+            }
+          : undefined,
+        style: {
+          stroke: ce.isSelected ? "#fde047" : ce.isProcess ? colorOf(ce.targetItem || ce.sourceItem) : "#f59e0b",
+          strokeWidth: ce.isSelected ? 3.2 : 2,
+        },
+        data: {
+          link: true,
+          connectionIndex,
+          sourceFanOffset,
+          targetFanOffset,
+        },
+      });
+    });
+
     return out;
   }, [visibleMind, processScope, items, rootId, root?.canvas?.x, colorOf, selectedEdgeIds]);
 
-  /* ---- Interactions: Movimento livre 2D durante o arraste para permitir reparenting e reordenação ---- */
   const onNodesChange = useCallback((changes: NodeChange<MindNode | ProcessNode>[]) => {
     setNodes((ns) => applyNodeChanges(changes, ns));
   }, []);
 
-  /* ---- Drag Start: Setup sibling list + trava de prevenção de ciclos (descendentes) ---- */
+  /* ---- Arraste Estrutural (XMind / Lucidchart): Reordenar entre irmãos ou Reaninhar sobre nó alvo ---- */
   const onNodeDragStart = useCallback(
     (_: unknown, node: MindNode | ProcessNode) => {
       const item = items[node.id];
-      if (!item) return;
+      if (!item || node.id === rootId) return;
 
       dropTargetRef.current = null;
       setDropTargetId(null);
+      setDropIndicator(null);
 
-      // Forma de processo: posicionamento livre no canvas
+      // Forma de processo independente
       if (item.canvas?.shape) {
         dragRef.current = {
           nodeId: node.id,
@@ -1491,29 +1581,25 @@ function MindMapInner({ rootId }: { rootId: string }) {
         return;
       }
 
-      if (node.id === rootId) {
-        dragRef.current = null;
-        if (!isSubmap) setActiveDragId(rootId);
-        return;
-      }
-
       if (!item.parent_id) return;
 
-      // Trava anticiclo: o nó arrastado + toda sua árvore de descendentes diretos e indiretos
+      // Trava anticiclo: o nó arrastado + toda sua subárvore de descendentes
       const descendantIds = descendantsOf(scopedItems, node.id).map((d) => d.id);
       const forbiddenIds = new Set<string>([node.id, ...descendantIds]);
 
-      const rootX = root?.canvas?.x ?? 0;
-      const side: 1 | -1 = node.position.x < rootX ? -1 : 1;
+      const side: 1 | -1 = getBranchSide(node.id, scopedItems);
 
       let siblings: ItemNode[];
       if (item.parent_id === rootId) {
-        const rootKids = Object.values(scopedItems).filter((i) => i.parent_id === rootId && i.canvas && !i.canvas.shape);
-        siblings = rootKids.filter((k) => (side === -1 ? k.canvas!.x < rootX : k.canvas!.x >= rootX));
+        siblings = Object.values(scopedItems).filter(
+          (i) => i.parent_id === rootId && !i.canvas?.shape && getBranchSide(i.id, scopedItems) === side,
+        );
       } else {
-        siblings = Object.values(scopedItems).filter((i) => i.parent_id === item.parent_id && i.canvas && !i.canvas.shape);
+        siblings = Object.values(scopedItems).filter(
+          (i) => i.parent_id === item.parent_id && !i.canvas?.shape,
+        );
       }
-      siblings.sort((a, b) => a.sort_order - b.sort_order);
+      siblings.sort((a, b) => a.sort_order - b.sort_order || (a.canvas?.y ?? 0) - (b.canvas?.y ?? 0));
 
       const initialIndex = siblings.findIndex((s) => s.id === node.id);
 
@@ -1521,7 +1607,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         nodeId: node.id,
         parentId: item.parent_id,
         side,
-        fixedX: node.position.x,
+        fixedX: item.canvas?.x ?? node.position.x,
         siblings,
         initialIndex: initialIndex >= 0 ? initialIndex : 0,
         forbiddenIds,
@@ -1530,10 +1616,9 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
       setActiveDragId(node.id);
     },
-    [items, scopedItems, isSubmap, rootId, root?.canvas?.x],
+    [items, scopedItems, rootId, getBranchSide],
   );
 
-  /* ---- Drag Move: Detecção de colisão para reparenting + linha guia em irmãos ---- */
   const onNodeDrag = useCallback(
     (_: unknown, node: MindNode | ProcessNode) => {
       const drag = dragRef.current;
@@ -1552,16 +1637,14 @@ function MindMapInner({ rootId }: { rootId: string }) {
         cy: node.position.y + dragDim.height / 2,
       };
 
-      // 1. Verificar colisão/sobreposição com outros nós válidos do mapa (excluindo a si mesmo e seus descendentes)
+      // 1. Verificar se o nó está sobre o centro de um card alvo para reaninhamento (reparenting)
       let bestTargetId: string | null = null;
       let bestOverlapArea = 0;
 
       for (const cand of visibleMind) {
         if (!cand.canvas) continue;
-        // Impedir ciclo (nó sobre si mesmo ou sobre qualquer descendente) e ignorar pai atual se apenas reordenando
         if (drag.forbiddenIds.has(cand.id)) continue;
         if (cand.id === drag.parentId && cand.id !== rootId) continue;
-        if (cand.id === rootId && drag.parentId === rootId) continue;
 
         const candDim =
           dimensionsRef.current.get(cand.id) ||
@@ -1584,7 +1667,26 @@ function MindMapInner({ rootId }: { rootId: string }) {
             Math.max(dragRect.y, candRect.y),
         );
 
-        if (overlapX > 14 && overlapY > 10) {
+        const isSibling =
+          cand.parent_id === drag.parentId &&
+          (cand.parent_id !== rootId || getBranchSide(cand.id, scopedItems) === drag.side);
+
+        if (isSibling) {
+          // Para um nó irmão: a faixa central (30%..70% da altura) reaninha dentro dele;
+          // as faixas superior/inferior (0..30% e 70..100%) acionam a linha guia de reordenação entre irmãos!
+          const inCenterBand =
+            dragRect.cy >= candRect.y + candRect.height * 0.3 &&
+            dragRect.cy <= candRect.y + candRect.height * 0.7;
+          if (inCenterBand && overlapX > candRect.width * 0.4 && overlapY > 12) {
+            const area = overlapX * overlapY;
+            if (area > bestOverlapArea) {
+              bestOverlapArea = area;
+              bestTargetId = cand.id;
+            }
+          }
+        } else if (overlapX > 20 && overlapY > 12) {
+          // Se for a raiz e o nó já é filho da raiz no mesmo lado, ignora
+          if (cand.id === rootId && drag.parentId === rootId) continue;
           const area = overlapX * overlapY;
           if (area > bestOverlapArea) {
             bestOverlapArea = area;
@@ -1607,9 +1709,9 @@ function MindMapInner({ rootId }: { rootId: string }) {
         setDropTargetId(null);
       }
 
-      // 2. Caso não esteja sobreposto a um nó alvo, exibir guia de reordenação entre irmãos
+      // 2. Exibir linha guia horizontal para reordenamento entre irmãos
       const others = drag.siblings.filter((s) => s.id !== node.id);
-      if (others.length === 0 || Math.abs(node.position.x - drag.fixedX) > 45) {
+      if (others.length === 0 || Math.abs(node.position.x - drag.fixedX) > 110) {
         setDropIndicator(null);
         return;
       }
@@ -1628,20 +1730,20 @@ function MindMapInner({ rootId }: { rootId: string }) {
         })
         .sort((a, b) => a.y - b.y);
 
-      const currentY = node.position.y;
+      const currentCenterY = dragRect.cy;
       const k = otherNodes.length;
       let targetIndex = 0;
       let indicatorY = otherNodes[0].y - MIN_GAP_Y / 2;
 
-      if (currentY < otherNodes[0].centerY) {
+      if (currentCenterY < otherNodes[0].centerY) {
         targetIndex = 0;
         indicatorY = otherNodes[0].y - MIN_GAP_Y / 2;
-      } else if (currentY >= otherNodes[k - 1].centerY) {
+      } else if (currentCenterY >= otherNodes[k - 1].centerY) {
         targetIndex = k;
         indicatorY = otherNodes[k - 1].y + otherNodes[k - 1].height + MIN_GAP_Y / 2;
       } else {
         for (let i = 0; i < k - 1; i++) {
-          if (currentY >= otherNodes[i].centerY && currentY < otherNodes[i + 1].centerY) {
+          if (currentCenterY >= otherNodes[i].centerY && currentCenterY < otherNodes[i + 1].centerY) {
             targetIndex = i + 1;
             indicatorY = otherNodes[i].y + otherNodes[i].height + MIN_GAP_Y / 2;
             break;
@@ -1656,10 +1758,9 @@ function MindMapInner({ rootId }: { rootId: string }) {
         targetIndex,
       });
     },
-    [rootId, items, visibleMind],
+    [rootId, items, visibleMind, scopedItems, getBranchSide],
   );
 
-  /* ---- Drag Stop: Reparenting sobre nó alvo OU reordenação entre irmãos ---- */
   const onNodeDragStop = useCallback(
     (_: unknown, node: MindNode | ProcessNode) => {
       setActiveDragId(null);
@@ -1671,45 +1772,31 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const drag = dragRef.current;
       dragRef.current = null;
 
-      // Forma de processo: salva coordenadas livres no canvas (exceto se for a própria raiz de um submapa)
+      // Forma de processo independente: salva posição no canvas
       if (items[node.id]?.canvas?.shape && node.id !== rootId) {
         updateItem(node.id, {
           canvas: {
             ...(items[node.id]?.canvas ?? { x: 0, y: 0 }),
-            x: node.position.x,
-            y: node.position.y,
+            x: Math.round(node.position.x),
+            y: Math.round(node.position.y),
           },
         });
         return;
       }
 
-      if (node.id === rootId) {
-        if (isSubmap) return;
-        const dx = node.position.x - (root?.canvas?.x ?? 0);
-        const dy = node.position.y - (root?.canvas?.y ?? 0);
-        if (dx === 0 && dy === 0) return;
-
-        const newRootCanvas = { ...(root?.canvas ?? { color: null }), x: node.position.x, y: node.position.y };
-        const updatedItems = { ...scopedItems, [rootId]: { ...root, canvas: newRootCanvas } };
-
-        const newPositions = layoutTree(updatedItems, rootId, collapsed, dimensionsRef.current);
-        updateItems(
-          Object.entries(newPositions)
-            .filter(([id]) => id === rootId || !isNodeCustomPositioned(id, items[id]))
-            .map(([id, p]) => ({
-              id,
-              patch: { canvas: { ...(items[id]?.canvas ?? {}), ...p } },
-            })),
+      const draggedItem = items[node.id];
+      if (!draggedItem || !drag || drag.isProcessNode) {
+        // Garante que qualquer nó da árvore volte imediatamente para sua coordenada determinística da grade
+        setNodes((prev) =>
+          prev.map((n) => {
+            const it = items[n.id];
+            return it?.canvas ? { ...n, position: { x: it.canvas.x, y: it.canvas.y } } : n;
+          }),
         );
         return;
       }
 
-      if (!drag || drag.isProcessNode) return;
-
-      const draggedItem = items[node.id];
-      if (!draggedItem) return;
-
-      // Caso 1: Reparenting — o nó foi solto sobre um nó de destino válido (não ele mesmo e não descendente)
+      // Caso 1: Reaninhar (Mover para dentro de outro nó alvo)
       if (
         targetParentId &&
         targetParentId !== node.id &&
@@ -1731,15 +1818,17 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
         const rootX = root?.canvas?.x ?? 0;
         const targetItem = scopedItems[targetParentId];
+        const targetSideDir =
+          targetParentId === rootId
+            ? node.position.x < rootX
+              ? -1
+              : 1
+            : getBranchSide(targetParentId, scopedItems);
         const targetSideX =
           targetParentId === rootId
-            ? node.position.x >= rootX
-              ? rootX + 160
-              : rootX - 160
-            : targetItem?.canvas?.x ?? node.position.x;
+            ? rootX + targetSideDir * (DEFAULT_NODE_WIDTH + LEVEL_GAP_X)
+            : (targetItem?.canvas?.x ?? rootX) + targetSideDir * (DEFAULT_NODE_WIDTH + LEVEL_GAP_X);
 
-        // Se o nó de destino for um dos 4 sub-nós de status do Kanban ("Backlog", "A Fazer", "Fazendo", "Concluído"),
-        // atualiza imediatamente o campo status da tarefa para refletir no quadro Kanban.
         const matchedKanbanStatus = getKanbanStatusForNode(scopedItems, targetParentId);
 
         const updatedItems: Record<string, ItemNode> = {
@@ -1753,8 +1842,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
               ? { project_id: targetItem.project_id }
               : {}),
             canvas: {
-              ...(draggedItem.canvas ?? { x: targetSideX, y: node.position.y }),
+              ...(draggedItem.canvas ?? { color: null }),
               x: targetSideX,
+              y: targetItem?.canvas?.y ?? 0,
+              custom_pos: false,
             },
           },
         };
@@ -1762,37 +1853,36 @@ function MindMapInner({ rootId }: { rootId: string }) {
         const newPositions = layoutTree(updatedItems, rootId, nextCollapsed, dimensionsRef.current);
         const patches: { id: string; patch: Partial<ItemNode> }[] = [];
 
-        // Patch principal do nó reparentado (atualiza parent_id, sort_order, status se aplicável e posição calculada)
-        customPosRef.current.delete(node.id);
-        saveMapStatePatch(rootId, { customPositionedIds: Array.from(customPosRef.current) });
-        const reparentedPos = newPositions[node.id] ?? { x: targetSideX, y: node.position.y };
-        patches.push({
-          id: node.id,
-          patch: {
-            parent_id: targetParentId,
-            sort_order: nextSortOrder,
-            ...(matchedKanbanStatus ? { status: matchedKanbanStatus } : {}),
-            ...(matchedKanbanStatus && targetItem?.project_id
-              ? { project_id: targetItem.project_id }
-              : {}),
-            canvas: {
-              ...(draggedItem.canvas ?? {}),
-              ...reparentedPos,
-              custom_pos: false,
-            },
-          },
-        });
-
-        // Atualizar posições de todos os demais nós do mapa (incluindo os descendentes do nó movido)
         for (const [id, p] of Object.entries(newPositions)) {
-          if (id === node.id) continue;
           if (isSubmap && id === rootId) continue;
-          const cur = items[id];
-          if (isNodeCustomPositioned(id, cur)) continue;
-          if (!cur || !cur.canvas || cur.canvas.x !== p.x || cur.canvas.y !== p.y) {
+          const cur = updatedItems[id];
+          if (id === node.id) {
             patches.push({
               id,
-              patch: { canvas: { ...(cur?.canvas ?? {}), ...p } },
+              patch: {
+                parent_id: targetParentId,
+                sort_order: nextSortOrder,
+                ...(matchedKanbanStatus ? { status: matchedKanbanStatus } : {}),
+                ...(matchedKanbanStatus && targetItem?.project_id
+                  ? { project_id: targetItem.project_id }
+                  : {}),
+                canvas: {
+                  ...(draggedItem.canvas ?? { color: null }),
+                  ...p,
+                  custom_pos: false,
+                },
+              },
+            });
+          } else if (cur) {
+            patches.push({
+              id,
+              patch: {
+                canvas: {
+                  ...(cur.canvas ?? { color: null }),
+                  ...p,
+                  custom_pos: false,
+                },
+              },
             });
           }
         }
@@ -1801,78 +1891,59 @@ function MindMapInner({ rootId }: { rootId: string }) {
         return;
       }
 
-      // Caso 2: Deslocamento manual / offset customizado (quando o usuário não mudou a ordem entre irmãos ou deslocou no eixo X)
-      if (!indicator || indicator.targetIndex === drag.initialIndex) {
-        const newX = Math.round(node.position.x);
-        const newY = Math.round(node.position.y);
-        const prevX = Math.round(draggedItem.canvas?.x ?? 0);
-        const prevY = Math.round(draggedItem.canvas?.y ?? 0);
-        if (newX !== prevX || newY !== prevY) {
-          markNodeCustomPositioned(node.id);
-          updateItem(node.id, {
-            canvas: {
-              ...(draggedItem.canvas ?? { x: newX, y: newY }),
-              x: newX,
-              y: newY,
-              custom_pos: true,
+      // Caso 2: Reordenar entre irmãos (quando solto com indicador de mudança de ordem)
+      if (indicator && indicator.targetIndex !== drag.initialIndex) {
+        const others = drag.siblings.filter((s) => s.id !== node.id);
+        const targetIdx = indicator.targetIndex;
+
+        const reordered = [
+          ...others.slice(0, targetIdx),
+          draggedItem,
+          ...others.slice(targetIdx),
+        ];
+
+        const updatedItems: Record<string, ItemNode> = { ...scopedItems };
+        const orderMap = new Map<string, number>();
+        reordered.forEach((s, idx) => {
+          const nextOrder = idx * 10;
+          orderMap.set(s.id, nextOrder);
+          updatedItems[s.id] = { ...updatedItems[s.id], sort_order: nextOrder };
+        });
+
+        const newPositions = layoutTree(updatedItems, rootId, collapsed, dimensionsRef.current);
+        const patches: { id: string; patch: Partial<ItemNode> }[] = [];
+
+        for (const [id, p] of Object.entries(newPositions)) {
+          if (isSubmap && id === rootId) continue;
+          const cur = updatedItems[id];
+          if (!cur) continue;
+          patches.push({
+            id,
+            patch: {
+              ...(orderMap.has(id) ? { sort_order: orderMap.get(id)! } : {}),
+              canvas: {
+                ...(cur.canvas ?? { color: null }),
+                ...p,
+                custom_pos: false,
+              },
             },
           });
         }
+
+        updateItems(patches);
         return;
       }
 
-      // Caso 3: Reordenação explícita de índice entre irmãos
-      const others = drag.siblings.filter((s) => s.id !== node.id);
-      const targetIdx = indicator.targetIndex;
-
-      const reordered = [
-        ...others.slice(0, targetIdx),
-        draggedItem,
-        ...others.slice(targetIdx),
-      ];
-
-      const updatedItems = { ...scopedItems };
-      reordered.forEach((s, idx) => {
-        updatedItems[s.id] = { ...updatedItems[s.id], sort_order: idx * 10 };
-      });
-
-      const newPositions = layoutTree(updatedItems, rootId, collapsed, dimensionsRef.current);
-
-      const patches: { id: string; patch: Partial<ItemNode> }[] = [];
-      const reorderedIds = new Set(reordered.map((s) => s.id));
-
-      reordered.forEach((s, idx) => {
-        const p = newPositions[s.id];
-        const keepCustom = s.id !== node.id && isNodeCustomPositioned(s.id, s);
-        patches.push({
-          id: s.id,
-          patch: {
-            sort_order: idx * 10,
-            canvas: keepCustom
-              ? { ...(s.canvas ?? { x: 0, y: 0 }) }
-              : { ...(s.canvas ?? {}), ...(p ?? { x: s.canvas?.x ?? 0, y: s.canvas?.y ?? 0 }), ...(s.id === node.id ? { custom_pos: false } : {}) },
-          },
-        });
-      });
-
-      for (const [id, p] of Object.entries(newPositions)) {
-        if (reorderedIds.has(id)) continue;
-        if (isSubmap && id === rootId) continue;
-        const cur = items[id];
-        if (isNodeCustomPositioned(id, cur)) continue;
-        if (!cur || !cur.canvas || cur.canvas.x !== p.x || cur.canvas.y !== p.y) {
-          patches.push({
-            id,
-            patch: { canvas: { ...(cur?.canvas ?? {}), ...p } },
-          });
-        }
-      }
-
-      if (patches.length > 0) {
-        updateItems(patches);
-      }
+      // Caso 3: Solto no vazio ou sem alteração de índice -> Encaixa de volta na posição determinística da grade
+      const pos = layoutTree(scopedItems, rootId, collapsed, dimensionsRef.current);
+      setNodes((prev) =>
+        prev.map((n) => {
+          const p = pos[n.id] ?? items[n.id]?.canvas;
+          return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+        }),
+      );
     },
-    [dropIndicator, rootId, root, items, scopedItems, isSubmap, collapsed, isNodeCustomPositioned, markNodeCustomPositioned, updateItem, updateItems],
+    [dropIndicator, rootId, root?.canvas?.x, items, scopedItems, isSubmap, collapsed, getBranchSide, updateItem, updateItems],
   );
 
   const deleteLinkEdge = useCallback(
@@ -2088,7 +2159,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
   }, []);
 
-  /* ---- addChild (Ramo do Mapa): Auto-layout e modo edição imediato ---- */
+  /* ---- addChild (Ramo do Mapa): Auto-layout determinístico bilateral e modo edição imediato ---- */
   const addChild = useCallback(
     (parentId: string) => {
       const parent = items[parentId];
@@ -2096,45 +2167,23 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const rootX = root?.canvas?.x ?? 0;
       const kids = Object.values(scopedItems).filter((i) => i.parent_id === parentId && !i.canvas?.shape);
 
-      let dir: 1 | -1 = (parent.canvas?.x ?? 0) < rootX ? -1 : 1;
+      let dir: 1 | -1 = getBranchSide(parentId, scopedItems);
       if (parentId === rootId) {
-        const right = kids.filter((k) => (k.canvas?.x ?? rootX) >= rootX).length;
+        const right = kids.filter(
+          (k) =>
+            (k.canvas?.x ?? rootX + 1) >= rootX &&
+            k.title?.trim().toLowerCase() !== "contexto",
+        ).length;
         dir = right <= kids.length - right ? 1 : -1;
       }
 
       const maxOrder = kids.reduce((m, s) => Math.max(m, s.sort_order), -1);
-
-      // Âncora: posição EXATA e ATUAL do pai (estado vivo do React Flow), nunca o layout automático antigo
-      const liveParent = rf.getNode(parentId);
-      const parentX = Math.round(liveParent?.position.x ?? parent.canvas?.x ?? 0);
-      const parentY = Math.round(liveParent?.position.y ?? parent.canvas?.y ?? 0);
-      const parentW =
-        liveParent?.measured?.width ??
-        liveParent?.width ??
-        dimensionsRef.current.get(parentId)?.width ??
-        180;
-
-      let newX: number;
-      if (dir === 1) {
-        newX = Math.round(parentX + parentW + 80);
-      } else {
-        newX = Math.round(parentX - DEFAULT_NODE_WIDTH - 80);
-      }
-
-      // Empilha abaixo dos filhos já existentes (posição viva), senão alinha ao Y do pai
-      let newY = parentY;
-      const kidsBottoms = kids
-        .map((k) => {
-          const kn = rf.getNode(k.id);
-          const ky = kn?.position.y ?? k.canvas?.y;
-          if (ky === undefined) return null;
-          const kh = kn?.measured?.height ?? dimensionsRef.current.get(k.id)?.height ?? DEFAULT_NODE_HEIGHT;
-          return ky + kh;
-        })
-        .filter((v): v is number => v !== null);
-      if (kidsBottoms.length > 0) {
-        newY = Math.round(Math.max(...kidsBottoms) + MIN_GAP_Y);
-      }
+      const parentX = parent.canvas?.x ?? rootX;
+      const parentY = parent.canvas?.y ?? 0;
+      const initialX =
+        dir === 1
+          ? parentX + DEFAULT_NODE_WIDTH + LEVEL_GAP_X
+          : parentX - DEFAULT_NODE_WIDTH - LEVEL_GAP_X;
 
       const n = createItem({
         parent_id: parentId,
@@ -2143,25 +2192,43 @@ function MindMapInner({ rootId }: { rootId: string }) {
         title: "Novo ramo",
         project_id: parent.project_id ?? root?.project_id ?? null,
         sort_order: maxOrder + 10,
-        canvas: { x: newX, y: newY, color: null, custom_pos: true },
+        canvas: { x: initialX, y: parentY, color: null, custom_pos: false },
       });
-      // Posição definida em relação ao pai: nenhum relayout deve movê-lo nem aos demais nós
-      markNodeCustomPositioned(n.id);
 
-      if (collapsed.has(parentId)) {
-        const nextCollapsed = new Set(collapsed);
+      const nextCollapsed = new Set(collapsed);
+      if (nextCollapsed.has(parentId)) {
         nextCollapsed.delete(parentId);
         setCollapsed(nextCollapsed);
         saveMapStatePatch(rootId, { collapsedIds: Array.from(nextCollapsed) });
       }
 
+      const updatedScope: Record<string, ItemNode> = {
+        ...scopedItems,
+        [n.id]: n,
+      };
+      const pos = layoutTree(updatedScope, rootId, nextCollapsed, dimensionsRef.current);
+      updateItems(
+        Object.entries(pos)
+          .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
+          .map(([nodeId, p]) => ({
+            id: nodeId,
+            patch: {
+              canvas: {
+                ...(updatedScope[nodeId]?.canvas ?? { color: null }),
+                ...p,
+                custom_pos: false,
+              },
+            },
+          })),
+      );
+
       setEditingId(n.id);
       setTimeout(() => selectOnly(n.id), 0);
     },
-    [items, scopedItems, activeScopeId, root, rootId, rf, createItem, collapsed, markNodeCustomPositioned, selectOnly],
+    [items, scopedItems, activeScopeId, root, rootId, isSubmap, getBranchSide, createItem, updateItems, collapsed, selectOnly],
   );
 
-  /* ---- addSibling (Irmão do Mapa): Insert sibling e run layoutTree ---- */
+  /* ---- addSibling (Irmão do Mapa): Insere abaixo do nó ativo no mesmo lado e recalcula a árvore ---- */
   const addSibling = useCallback(
     (id: string) => {
       const it = items[id];
@@ -2170,27 +2237,29 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const parent = items[it.parent_id];
       if (!parent) return;
 
+      const rootX = root?.canvas?.x ?? 0;
+      const dir = getBranchSide(id, scopedItems);
+
       const siblings = Object.values(scopedItems)
-        .filter((i) => i.parent_id === it.parent_id && !i.canvas?.shape)
+        .filter((i) => {
+          if (i.parent_id !== it.parent_id || i.canvas?.shape) return false;
+          if (it.parent_id === rootId) {
+            return getBranchSide(i.id, scopedItems) === dir;
+          }
+          return true;
+        })
         .sort((a, b) => a.sort_order - b.sort_order);
 
-      // Âncora: posição EXATA e ATUAL do nó ativo (estado vivo do React Flow), sem layout automático
-      const liveActive = rf.getNode(id);
-      const activeX = Math.round(liveActive?.position.x ?? it.canvas?.x ?? 0);
+      const currentIdx = siblings.findIndex((s) => s.id === id);
+      const insertIdx = currentIdx >= 0 ? currentIdx + 1 : siblings.length;
 
-      // Abaixo do último irmão existente (posições vivas): Y = último.y + altura + 40
-      let newY = Math.round(liveActive?.position.y ?? it.canvas?.y ?? 0);
-      let lowestBottom = -Infinity;
-      for (const s of siblings) {
-        const sn = rf.getNode(s.id);
-        const sy = sn?.position.y ?? s.canvas?.y;
-        if (sy === undefined) continue;
-        const sh = sn?.measured?.height ?? dimensionsRef.current.get(s.id)?.height ?? DEFAULT_NODE_HEIGHT;
-        lowestBottom = Math.max(lowestBottom, sy + sh);
-      }
-      if (lowestBottom > -Infinity) newY = Math.round(lowestBottom + 40);
-
-      const maxOrder = siblings.reduce((m, s) => Math.max(m, s.sort_order), -1);
+      const initialX =
+        it.parent_id === rootId
+          ? dir === 1
+            ? rootX + DEFAULT_NODE_WIDTH + LEVEL_GAP_X
+            : rootX - DEFAULT_NODE_WIDTH - LEVEL_GAP_X
+          : it.canvas?.x ?? 0;
+      const initialY = it.canvas?.y ?? 0;
 
       const n = createItem({
         parent_id: it.parent_id,
@@ -2198,16 +2267,47 @@ function MindMapInner({ rootId }: { rootId: string }) {
         type: "MINDMAP_NODE",
         title: "Novo ramo",
         project_id: it.project_id ?? root?.project_id ?? null,
-        sort_order: maxOrder + 10,
-        canvas: { x: activeX, y: newY, color: null, custom_pos: true },
+        sort_order: insertIdx * 10,
+        canvas: { x: initialX, y: initialY, color: null, custom_pos: false },
       });
-      // Posição definida pela âncora viva: nenhum relayout deve movê-lo nem aos demais nós
-      markNodeCustomPositioned(n.id);
+
+      const reorderedSiblings = [
+        ...siblings.slice(0, insertIdx),
+        n,
+        ...siblings.slice(insertIdx),
+      ];
+
+      const updatedScope: Record<string, ItemNode> = {
+        ...scopedItems,
+        [n.id]: n,
+      };
+      reorderedSiblings.forEach((s, idx) => {
+        updatedScope[s.id] = { ...updatedScope[s.id], sort_order: idx * 10 };
+      });
+
+      const pos = layoutTree(updatedScope, rootId, collapsed, dimensionsRef.current);
+      const siblingOrderMap = new Map(reorderedSiblings.map((s, idx) => [s.id, idx * 10]));
+
+      updateItems(
+        Object.entries(pos)
+          .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
+          .map(([nodeId, p]) => ({
+            id: nodeId,
+            patch: {
+              ...(siblingOrderMap.has(nodeId) ? { sort_order: siblingOrderMap.get(nodeId)! } : {}),
+              canvas: {
+                ...(updatedScope[nodeId]?.canvas ?? { color: null }),
+                ...p,
+                custom_pos: false,
+              },
+            },
+          })),
+      );
 
       setEditingId(n.id);
       setTimeout(() => selectOnly(n.id), 0);
     },
-    [items, scopedItems, activeScopeId, root?.project_id, rootId, rf, createItem, markNodeCustomPositioned, selectOnly],
+    [items, scopedItems, activeScopeId, root, rootId, isSubmap, getBranchSide, collapsed, createItem, updateItems, selectOnly],
   );
 
   /* ---- Adicionar Forma de Processo / Fluxograma ---- */
@@ -2337,14 +2437,14 @@ function MindMapInner({ rootId }: { rootId: string }) {
       const pos = layoutTree(remainingScoped, rootId, collapsed, dimensionsRef.current);
       useStore.getState().updateItems(
         Object.entries(pos)
-          .filter(([nodeId]) => !(isSubmap && nodeId === rootId) && !isNodeCustomPositioned(nodeId, remainingScoped[nodeId]))
+          .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
           .map(([nodeId, p]) => ({
             id: nodeId,
-            patch: { canvas: { ...(remainingScoped[nodeId]?.canvas ?? {}), ...p } },
+            patch: { canvas: { ...(remainingScoped[nodeId]?.canvas ?? {}), ...p, custom_pos: false } },
           })),
       );
     }, 0);
-  }, [selectedIds, rootId, activeScopeId, isSubmap, childCounts, deleteItem, collapsed, isNodeCustomPositioned]);
+  }, [selectedIds, rootId, activeScopeId, isSubmap, childCounts, deleteItem, collapsed]);
 
   const collapsibleParentIds = useMemo(() => {
     const nonRootParents = mindScope
@@ -2367,8 +2467,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         : new Set<string>();
 
     setCollapsed(nextCollapsed);
-    customPosRef.current.clear();
-    saveMapStatePatch(rootId, { collapsedIds: Array.from(nextCollapsed), customPositionedIds: [] });
+    saveMapStatePatch(rootId, { collapsedIds: Array.from(nextCollapsed) });
 
     const pos = layoutTree(mindScope, rootId, nextCollapsed, dimensionsRef.current);
     updateItems(
@@ -2393,6 +2492,66 @@ function MindMapInner({ rootId }: { rootId: string }) {
       selectedIds.map((id) => ({ id, patch: { status: items[id]?.status ?? "TODO", project_id: items[id]?.project_id ?? root?.project_id ?? null } })),
     );
 
+  /* ---- Reordenamento de Irmãos via Teclado (Ctrl/Cmd + ArrowUp / ArrowDown) ---- */
+  const moveSiblingOrder = useCallback(
+    (id: string, delta: -1 | 1) => {
+      const it = items[id];
+      if (!it || !it.parent_id || id === rootId || it.canvas?.shape) return;
+
+      const dir = getBranchSide(id, scopedItems);
+      const siblings = Object.values(scopedItems)
+        .filter((s) => {
+          if (s.parent_id !== it.parent_id || s.canvas?.shape) return false;
+          if (it.parent_id === rootId) {
+            return getBranchSide(s.id, scopedItems) === dir;
+          }
+          return true;
+        })
+        .sort((a, b) => a.sort_order - b.sort_order || (a.canvas?.y ?? 0) - (b.canvas?.y ?? 0));
+
+      const idx = siblings.findIndex((s) => s.id === id);
+      const targetIdx = idx + delta;
+      if (idx < 0 || targetIdx < 0 || targetIdx >= siblings.length) return;
+
+      const reordered = [...siblings];
+      const [moved] = reordered.splice(idx, 1);
+      reordered.splice(targetIdx, 0, moved);
+
+      const updatedScope: Record<string, ItemNode> = { ...scopedItems };
+      const orderMap = new Map<string, number>();
+      reordered.forEach((s, i) => {
+        const nextOrder = i * 10;
+        orderMap.set(s.id, nextOrder);
+        updatedScope[s.id] = { ...updatedScope[s.id], sort_order: nextOrder };
+      });
+
+      const pos = layoutTree(updatedScope, rootId, collapsed, dimensionsRef.current);
+      const patches: { id: string; patch: Partial<ItemNode> }[] = [];
+
+      for (const [nodeId, p] of Object.entries(pos)) {
+        if (isSubmap && nodeId === rootId) continue;
+        const cur = updatedScope[nodeId];
+        if (!cur) continue;
+        patches.push({
+          id: nodeId,
+          patch: {
+            ...(orderMap.has(nodeId) ? { sort_order: orderMap.get(nodeId)! } : {}),
+            canvas: {
+              ...(cur.canvas ?? { color: null }),
+              ...p,
+              custom_pos: false,
+            },
+          },
+        });
+      }
+
+      if (patches.length > 0) {
+        updateItems(patches);
+      }
+    },
+    [items, scopedItems, rootId, isSubmap, getBranchSide, collapsed, updateItems],
+  );
+
   /* ---- keyboard shortcuts ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2401,7 +2560,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
       if (!wrapRef.current) return;
       const sel = selectedIds[0];
 
-      if (e.key === "Tab" && sel) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "ArrowUp" || e.key === "ArrowDown") && sel) {
+        e.preventDefault();
+        moveSiblingOrder(sel, e.key === "ArrowUp" ? -1 : 1);
+      } else if (e.key === "Tab" && sel) {
         e.preventDefault();
         addChild(sel);
       } else if (e.key === "Enter" && sel) {
@@ -2422,43 +2584,11 @@ function MindMapInner({ rootId }: { rootId: string }) {
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length) {
         e.preventDefault();
         removeSelected();
-      } else if (
-        (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") &&
-        selectedIds.length
-      ) {
-        e.preventDefault();
-        const step = e.shiftKey ? 24 : 8;
-        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
-        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        const currentItems = useStore.getState().items;
-        const patches: { id: string; patch: Partial<ItemNode> }[] = [];
-        for (const id of selectedIds) {
-          if (isSubmap && id === rootId) continue;
-          const it = currentItems[id];
-          if (!it?.canvas) continue;
-          if (!it.canvas.shape && id !== rootId) {
-            markNodeCustomPositioned(id);
-          }
-          patches.push({
-            id,
-            patch: {
-              canvas: {
-                ...it.canvas,
-                x: Math.round(it.canvas.x + dx),
-                y: Math.round(it.canvas.y + dy),
-                ...(it.canvas.shape || id === rootId ? {} : { custom_pos: true }),
-              },
-            },
-          });
-        }
-        if (patches.length > 0) {
-          updateItems(patches);
-        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedIds, selectedEdgeIds, edges, deleteLinkEdge, addChild, addSibling, removeSelected, rootId, isSubmap, markNodeCustomPositioned, updateItems]);
+  }, [selectedIds, selectedEdgeIds, edges, deleteLinkEdge, addChild, addSibling, moveSiblingOrder, removeSelected, rootId]);
 
   const ctx = useMemo<Ctx>(
     () => ({
@@ -2470,9 +2600,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         const prev = dimensionsRef.current.get(id);
         if (!prev || Math.abs(prev.height - dim.height) > 2 || Math.abs(prev.width - dim.width) > 2) {
           dimensionsRef.current.set(id, dim);
-          if (editingIdRef.current) {
-            scheduleRelayout();
-          }
+          scheduleRelayout();
         }
       },
       updateDimensions: (id, width, height) => {
@@ -2487,8 +2615,9 @@ function MindMapInner({ rootId }: { rootId: string }) {
       },
       toggleCollapse: (id) =>
         setCollapsed((s) => {
+          const wasCollapsed = s.has(id);
           const c = new Set(s);
-          if (c.has(id)) c.delete(id);
+          if (wasCollapsed) c.delete(id);
           else c.add(id);
 
           saveMapStatePatch(rootId, { collapsedIds: Array.from(c) });
@@ -2507,10 +2636,16 @@ function MindMapInner({ rootId }: { rootId: string }) {
             const pos = layoutTree(currentScoped, rootId, c, dimensionsRef.current);
             useStore.getState().updateItems(
               Object.entries(pos)
-                .filter(([nodeId]) => !(isSubmap && nodeId === rootId) && !isNodeCustomPositioned(nodeId, currentItems[nodeId]))
+                .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
                 .map(([nodeId, p]) => ({
                   id: nodeId,
-                  patch: { canvas: { ...(currentItems[nodeId]?.canvas ?? {}), ...p } },
+                  patch: {
+                    canvas: {
+                      ...(currentScoped[nodeId]?.canvas ?? { color: null }),
+                      ...p,
+                      custom_pos: false,
+                    },
+                  },
                 })),
             );
           }, 0);
@@ -2549,10 +2684,10 @@ function MindMapInner({ rootId }: { rootId: string }) {
           const pos = layoutTree(remainingScoped, rootId, collapsed, dimensionsRef.current);
           useStore.getState().updateItems(
             Object.entries(pos)
-              .filter(([nodeId]) => !(isSubmap && nodeId === rootId) && !isNodeCustomPositioned(nodeId, remainingScoped[nodeId]))
+              .filter(([nodeId]) => !(isSubmap && nodeId === rootId))
               .map(([nodeId, p]) => ({
                 id: nodeId,
-                patch: { canvas: { ...(remainingScoped[nodeId]?.canvas ?? {}), ...p } },
+                patch: { canvas: { ...(remainingScoped[nodeId]?.canvas ?? {}), ...p, custom_pos: false } },
               })),
           );
         }, 0);
@@ -2561,7 +2696,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
         quickAddConnected(sourceId, shape, direction),
       deleteLinkEdge: (sourceId, targetId) => deleteLinkEdge(sourceId, targetId),
     }),
-    [updateItem, openDrawer, createItem, deleteItem, rootId, activeScopeId, isSubmap, root?.project_id, collapsed, scheduleRelayout, items, quickAddConnected, isNodeCustomPositioned, deleteLinkEdge],
+    [updateItem, openDrawer, createItem, deleteItem, rootId, activeScopeId, isSubmap, root?.project_id, collapsed, scheduleRelayout, items, quickAddConnected, deleteLinkEdge],
   );
 
   if (!root) return <div className="empty-state"><h1>Mapa não encontrado</h1></div>;
@@ -2574,6 +2709,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
+          nodesDraggable={true}
           connectionMode={ConnectionMode.Loose}
           edgesReconnectable={true}
           reconnectRadius={24}
@@ -2634,7 +2770,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
           />
           <Controls showInteractive={false} className="canvas-controls" />
 
-          {/* Insertion guide line rendered dynamically inside the viewport */}
+          {/* Linha guia de inserção entre irmãos renderizada dinamicamente no viewport */}
           <ViewportPortal>
             {dropIndicator && (
               <div
@@ -2860,7 +2996,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
           )}
 
           <Panel position="bottom-left" className="canvas-hints">
-            <kbd>+ Processo</kbd> fluxograma livre · <kbd>Arrastar âncora</kbd> conectar setas · <kbd>Tab</kbd> filho · <kbd>Enter</kbd> irmão · <kbd>F2</kbd> renomear · <kbd>Del</kbd> excluir
+            <kbd>Arrastar</kbd> reordenar/reaninhar · <kbd>Ctrl+↑/↓</kbd> subir/descer · <kbd>Tab</kbd> filho · <kbd>Enter</kbd> irmão · <kbd>F2</kbd> renomear · <kbd>Del</kbd> excluir
           </Panel>
         </ReactFlow>
       </div>

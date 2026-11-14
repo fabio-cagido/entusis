@@ -5,6 +5,7 @@ import type { ItemNode, ItemShare, Project, Status } from "./types";
 import { WEEKDAY_LABEL } from "./types";
 import type { Repository, RemoteChange } from "./repository/types";
 import { LocalRepository } from "./repository/local";
+import { getSupabase, isSupabaseConfigured } from "./supabase/client";
 import { buildSeed, buildWelcomeSeed, newItem } from "./seed";
 
 type Theme = "system" | "light" | "dark";
@@ -281,6 +282,7 @@ interface State {
 
   createProject(p: Partial<Project>): Project;
   updateProject(id: string, patch: Partial<Project>): void;
+  toggleProjectArchived(id: string): Promise<boolean>;
   deleteProject(id: string): void;
   duplicateProject(id: string): Project | null;
 
@@ -485,17 +487,12 @@ export const useStore = create<State>((set, get) => {
             focusedIds = [];
           }
 
-          let archivedSet: Set<string> | null = null;
-          try {
-            const rawArchived = typeof window !== "undefined" ? localStorage.getItem("nf-archived-projects") : null;
-            if (rawArchived) archivedSet = new Set(JSON.parse(rawArchived));
-          } catch {
-            archivedSet = null;
-          }
-
-          // Limpar localStorage legado para não re-duplicar quando usando Supabase
-          if (typeof window !== "undefined" && r.kind === "supabase") {
-            window.localStorage.removeItem("nodes-flows:v1");
+          // Limpar localStorage legado para não re-duplicar ou sobrescrever estado do banco quando usando Supabase
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem("nf-archived-projects");
+            if (r.kind === "supabase") {
+              window.localStorage.removeItem("nodes-flows:v1");
+            }
           }
 
           // Separa itens ativos dos itens na lixeira (Soft Delete)
@@ -526,7 +523,7 @@ export const useStore = create<State>((set, get) => {
               p.id,
               {
                 ...p,
-                is_archived: archivedSet !== null ? archivedSet.has(p.id) : Boolean(p.is_archived),
+                is_archived: Boolean(p.is_archived),
               },
             ])
           );
@@ -1392,16 +1389,9 @@ export const useStore = create<State>((set, get) => {
         is_archived: false,
         ...p,
       };
-      set((s) => {
-        const nextProjects = { ...s.projects, [pr.id]: pr };
-        if (typeof window !== "undefined") {
-          const archivedIds = Object.values(nextProjects)
-            .filter((proj) => proj.is_archived)
-            .map((proj) => proj.id);
-          localStorage.setItem("nf-archived-projects", JSON.stringify(archivedIds));
-        }
-        return { projects: nextProjects };
-      });
+      set((s) => ({
+        projects: { ...s.projects, [pr.id]: pr },
+      }));
       pendingProjects.add(pr.id);
       // Cria automaticamente o ramo "📋 Kanban" e os 4 sub-nós de status para o novo projeto
       get().ensureProjectKanbanBranch(pr.id);
@@ -1412,16 +1402,9 @@ export const useStore = create<State>((set, get) => {
     updateProject(id, patch) {
       const cur = get().projects[id];
       if (!cur) return;
-      set((s) => {
-        const nextProjects = { ...s.projects, [id]: { ...s.projects[id], ...patch } };
-        if (typeof window !== "undefined" && patch.is_archived !== undefined) {
-          const archivedIds = Object.values(nextProjects)
-            .filter((proj) => proj.is_archived)
-            .map((proj) => proj.id);
-          localStorage.setItem("nf-archived-projects", JSON.stringify(archivedIds));
-        }
-        return { projects: nextProjects };
-      });
+      set((s) => ({
+        projects: { ...s.projects, [id]: { ...s.projects[id], ...patch } },
+      }));
       if (patch.name) {
         const { items } = get();
         const page =
@@ -1443,6 +1426,50 @@ export const useStore = create<State>((set, get) => {
       schedule();
     },
 
+    async toggleProjectArchived(id) {
+      const cur = get().projects[id];
+      if (!cur) return false;
+      const currentStatus = Boolean(cur.is_archived);
+      const nextStatus = !currentStatus;
+
+      // Atualização otimista imediata na UI
+      set((s) => ({
+        projects: {
+          ...s.projects,
+          [id]: { ...s.projects[id], is_archived: nextStatus },
+        },
+      }));
+
+      const { repo } = get();
+      const sb = getSupabase();
+      if (repo?.kind === "supabase" && isSupabaseConfigured && sb) {
+        const { error } = await sb
+          .from("projects")
+          .update({ is_archived: nextStatus })
+          .eq("id", id);
+
+        if (error) {
+          console.error("[ayolia] falha ao atualizar is_archived no Supabase:", error);
+          // Reverte atualização otimista em caso de falha na requisição
+          set((s) => ({
+            projects: {
+              ...s.projects,
+              [id]: { ...s.projects[id], is_archived: currentStatus },
+            },
+            sync: "error",
+            syncError: `Falha ao atualizar arquivamento do projeto: ${error.message}`,
+          }));
+          return currentStatus;
+        }
+        return nextStatus;
+      }
+
+      // Fallback para modo local (LocalRepository)
+      pendingProjects.add(id);
+      schedule();
+      return nextStatus;
+    },
+
     deleteProject(id) {
       const { projects, items, favorites } = get();
       const next = { ...projects };
@@ -1454,10 +1481,6 @@ export const useStore = create<State>((set, get) => {
       });
       if (typeof window !== "undefined") {
         localStorage.setItem("nf-favorites", JSON.stringify(nextFavs));
-        const archivedIds = Object.values(next)
-          .filter((proj) => proj.is_archived)
-          .map((proj) => proj.id);
-        localStorage.setItem("nf-archived-projects", JSON.stringify(archivedIds));
       }
       // Remove todos os itens vinculados ao projeto ao movê-lo para a lixeira
       const affected = Object.values(items).filter((i) => i.project_id === id);

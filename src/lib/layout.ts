@@ -1,7 +1,9 @@
 import type { ItemNode } from "./types";
 
-export const MIN_GAP_Y = 24;
-export const LEVEL_GAP_X = 120; // Espaçamento horizontal constante e uniforme entre níveis
+export const MIN_GAP_Y = 34; // Espaçamento vertical mínimo entre cards (cria corredores limpos de passagem)
+export const VERTICAL_GAP = MIN_GAP_Y;
+export const LEVEL_GAP_X = 136; // Espaçamento horizontal constante e uniforme entre níveis
+export const HORIZONTAL_GAP = LEVEL_GAP_X;
 export const DEFAULT_NODE_WIDTH = 200;
 export const DEFAULT_NODE_HEIGHT = 46;
 
@@ -211,8 +213,11 @@ export function layoutTree(
 
   const hasCanvas = rootKids.some((k) => k.canvas && k.canvas.x !== origin.x);
   if (hasCanvas) {
-    rightKids = rootKids.filter((k) => (k.canvas?.x ?? origin.x + 1) >= origin.x);
-    leftKids = rootKids.filter((k) => (k.canvas?.x ?? origin.x + 1) < origin.x);
+    const isLeftRootChild = (k: ItemNode) =>
+      (k.canvas?.x ?? origin.x + 1) < origin.x ||
+      k.title?.trim().toLowerCase() === "contexto";
+    rightKids = rootKids.filter((k) => !isLeftRootChild(k));
+    leftKids = rootKids.filter((k) => isLeftRootChild(k));
   } else {
     const half = Math.ceil(rootKids.length / 2);
     rightKids = rootKids.slice(0, half);
