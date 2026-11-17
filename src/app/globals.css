@@ -235,6 +235,103 @@ input, select, textarea {
   filter: drop-shadow(0 2px 6px rgba(245, 158, 11, 0.25));
 }
 
+/* Logo Vetorial Animada (AyoliaLogo) */
+.ayolia-logo {
+  display: inline-block;
+  flex-shrink: 0;
+  background: transparent;
+  overflow: visible;
+  filter: drop-shadow(0 2px 6px rgba(245, 158, 11, 0.28));
+  transition: filter 0.25s ease;
+}
+
+.ayolia-logo .wing-left {
+  transform-box: view-box;
+  transform-origin: 82px 108px;
+  animation: ayolia-wing-left-flap 2.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+.ayolia-logo .wing-right {
+  transform-box: view-box;
+  transform-origin: 118px 108px;
+  animation: ayolia-wing-right-flap 2.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+.ayolia-logo .emerald-gem {
+  transform-box: view-box;
+  transform-origin: 100px 100px;
+  animation: ayolia-gem-pulse 2.8s ease-in-out infinite;
+}
+
+.brand:hover .ayolia-logo,
+.ayolia-logo:hover {
+  filter: drop-shadow(0 3px 10px rgba(245, 158, 11, 0.42));
+}
+
+.brand:hover .ayolia-logo .wing-left,
+.ayolia-logo:hover .wing-left {
+  animation-duration: 1.2s;
+}
+
+.brand:hover .ayolia-logo .wing-right,
+.ayolia-logo:hover .wing-right {
+  animation-duration: 1.2s;
+}
+
+.brand:hover .ayolia-logo .emerald-gem,
+.ayolia-logo:hover .emerald-gem {
+  animation-duration: 1.2s;
+}
+
+.ayolia-logo--fast .wing-left,
+.ayolia-logo--fast .wing-right,
+.ayolia-logo--fast .emerald-gem {
+  animation-duration: 1.5s;
+}
+
+.ayolia-logo--loading {
+  animation: ayolia-logo-float 3s ease-in-out infinite;
+  filter: drop-shadow(0 6px 18px rgba(245, 158, 11, 0.36));
+}
+
+@keyframes ayolia-logo-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes ayolia-wing-left-flap {
+  0%, 100% {
+    transform: rotate(-4deg) scaleX(1.02);
+  }
+  50% {
+    transform: rotate(4deg) scaleX(0.95);
+  }
+}
+
+@keyframes ayolia-wing-right-flap {
+  0%, 100% {
+    transform: rotate(4deg) scaleX(1.02);
+  }
+  50% {
+    transform: rotate(-4deg) scaleX(0.95);
+  }
+}
+
+@keyframes ayolia-gem-pulse {
+  0%, 100% {
+    filter: brightness(1) drop-shadow(0 0 2px rgba(16, 185, 129, 0.25));
+  }
+  50% {
+    filter: brightness(1.18) drop-shadow(0 0 6px rgba(52, 211, 153, 0.65));
+  }
+}
+
 .brand-logo--lg {
   width: 80px;
   height: 80px;

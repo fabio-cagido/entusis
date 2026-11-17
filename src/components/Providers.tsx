@@ -1,11 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
 import { SupabaseRepository } from "@/lib/repository/supabase";
 import { checkUrlForGoogleTokens, setGcalTokens } from "@/lib/google/calendar";
+import AyoliaLogo from "./AyoliaLogo";
 import LoginScreen from "./LoginScreen";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
@@ -107,13 +107,11 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   if (!ready)
     return (
       <div className="splash">
-        <Image
-          src="/logo.png"
-          alt="Ayolia"
-          width={68}
-          height={68}
-          className="brand-logo brand-logo--lg"
-          priority
+        <AyoliaLogo
+          size={76}
+          speed="fast"
+          isLoading={true}
+          className="brand-logo--lg"
         />
         <p>Carregando seus nós…</p>
       </div>

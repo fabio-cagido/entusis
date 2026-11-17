@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase/client";
 import { Lock, Mail, Sparkles, UserPlus, LogIn } from "lucide-react";
+import AyoliaLogo from "./AyoliaLogo";
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -101,13 +101,10 @@ export default function LoginScreen() {
   return (
     <div className="login">
       <div className="login-card glass">
-        <Image
-          src="/logo.png"
-          alt="Ayolia"
-          width={80}
-          height={80}
-          className="brand-logo brand-logo--lg"
-          priority
+        <AyoliaLogo
+          size={84}
+          isLoading={loading}
+          className="brand-logo--lg"
         />
         <h1>Ayolia</h1>
         <p className="muted">Páginas, mapas mentais e agenda em uma única base.</p>

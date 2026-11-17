@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -39,6 +38,7 @@ import {
 import { childrenOf, useStore, viewHref } from "@/lib/store";
 import type { ItemNode, Project } from "@/lib/types";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+import AyoliaLogo from "./AyoliaLogo";
 import ShareMindMapModal from "./ShareMindMapModal";
 import TrashModal from "./TrashModal";
 
@@ -935,14 +935,7 @@ export default function Sidebar() {
         <aside className="sidebar" aria-hidden={sidebarCollapsed && !hoverPeek}>
           <div className="brand-row">
             <Link href="/today" className="brand">
-              <Image
-                src="/logo.png"
-                alt="Ayolia"
-                width={34}
-                height={34}
-                className="brand-logo"
-                priority
-              />
+              <AyoliaLogo size={36} />
               <span className="brand-name">Ayolia</span>
             </Link>
             <button
