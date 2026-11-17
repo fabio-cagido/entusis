@@ -27,6 +27,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Sparkles,
   Star,
   Sun,
   Sunrise,
@@ -798,6 +799,8 @@ export default function Sidebar() {
   const items = useStore((s) => s.items);
   const trashedItems = useStore((s) => s.trashedItems);
   const openTrashModal = useStore((s) => s.openTrashModal);
+  const copilotOpen = useStore((s) => s.copilotOpen);
+  const openCopilot = useStore((s) => s.openCopilot);
   const favorites = useStore((s) => s.favorites);
   const repo = useStore((s) => s.repo);
   const sync = useStore((s) => s.sync);
@@ -976,6 +979,16 @@ export default function Sidebar() {
             )}
           </Link>
         ))}
+        <button
+          type="button"
+          id="nav-copilot-ai"
+          className={`side-nav-item copilot-side-btn ${copilotOpen ? "is-active" : ""}`}
+          onClick={() => openCopilot(!copilotOpen)}
+          title="Conversar com o Ayo, a IA do Ayolia"
+        >
+          <Sparkles size={16} className="copilot-sparkle-icon" />
+          <span className="side-nav-label">Ayo</span>
+        </button>
       </nav>
 
       <div className="side-scroll">

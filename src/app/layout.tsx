@@ -3,6 +3,7 @@ import "./globals.css";
 import Providers from "@/components/Providers";
 import Sidebar from "@/components/Sidebar";
 import NodeDrawer from "@/components/NodeDrawer";
+import CopilotDrawer from "@/components/CopilotDrawer";
 
 export const metadata: Metadata = {
   title: {
@@ -42,6 +43,7 @@ export default function RootLayout({
             <Sidebar />
             <main className="app-main">{children}</main>
             <NodeDrawer />
+            <CopilotDrawer />
           </div>
         </Providers>
       </body>

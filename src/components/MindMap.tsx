@@ -959,6 +959,7 @@ function MindMapInner({ rootId }: { rootId: string }) {
 
   const root = items[rootId];
   const openShareModal = useStore((s) => s.openShareModal);
+  const openCopilot = useStore((s) => s.openCopilot);
   const shares = useStore((s) => s.shares);
   const currentUserId = useStore((s) => s.currentUserId);
 
@@ -2884,6 +2885,20 @@ function MindMapInner({ rootId }: { rootId: string }) {
           </Panel>
 
           <Panel position="top-right" className="canvas-panel glass" style={{ overflow: "visible" }}>
+            <button
+              id="canvas-copilot-btn"
+              className="btn btn-xs copilot-trigger-btn"
+              onClick={() =>
+                openCopilot(true, {
+                  rootNodeId: rootId,
+                  projectId: root.project_id ?? null,
+                })
+              }
+              title="Conversar com o Ayo sobre este mapa"
+            >
+              ✨ Ayo
+            </button>
+
             <button
               id="canvas-share-btn"
               className="btn btn-primary btn-xs"

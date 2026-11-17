@@ -255,6 +255,8 @@ interface State {
   drawerId: string | null;
   shareModalItemId: string | null;
   trashModalOpen: boolean;
+  copilotOpen: boolean;
+  copilotContext: { projectId?: string | null; rootNodeId?: string | null } | null;
   theme: Theme;
   sync: SyncState;
   syncError: string | null;
@@ -290,6 +292,7 @@ interface State {
   openDrawer(id: string | null): void;
   openShareModal(id: string | null): void;
   openTrashModal(open: boolean): void;
+  openCopilot(open: boolean, ctx?: { projectId?: string | null; rootNodeId?: string | null }): void;
   upsertShareLocal(share: ItemShare): void;
   removeShareLocal(shareId: string): void;
   setTheme(t: Theme): void;
@@ -428,6 +431,8 @@ export const useStore = create<State>((set, get) => {
     drawerId: null,
     shareModalItemId: null,
     trashModalOpen: false,
+    copilotOpen: false,
+    copilotContext: null,
     theme: "system",
     sync: "idle",
     syncError: null,
@@ -1537,6 +1542,13 @@ export const useStore = create<State>((set, get) => {
         get().purgeExpiredTrash();
       }
       set({ trashModalOpen: open });
+    },
+
+    openCopilot(open, ctx) {
+      set((s) => ({
+        copilotOpen: open,
+        copilotContext: ctx !== undefined ? ctx : open ? s.copilotContext : null,
+      }));
     },
 
     upsertShareLocal(share) {

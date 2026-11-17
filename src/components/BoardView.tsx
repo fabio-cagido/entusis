@@ -32,6 +32,7 @@ export default function BoardView() {
   const updateItem = useStore((s) => s.updateItem);
   const updateProject = useStore((s) => s.updateProject);
   const openDrawer = useStore((s) => s.openDrawer);
+  const openCopilot = useStore((s) => s.openCopilot);
 
   const root = rootId ? items[rootId] : null;
   const project = projectId ? projects[projectId] : null;
@@ -123,6 +124,21 @@ export default function BoardView() {
         </div>
 
         <div className="view-head-actions">
+          <button
+            type="button"
+            id="board-copilot-btn"
+            className="btn btn-xs copilot-trigger-btn"
+            onClick={() =>
+              openCopilot(true, {
+                projectId: projectId ?? root?.project_id ?? null,
+                rootNodeId: projectPage?.id ?? rootId ?? null,
+              })
+            }
+            title="Conversar com o Ayo sobre este projeto/quadro"
+          >
+            ✨ Ayo
+          </button>
+
           {/* Alternador de Visões do Projeto: Página x Mapa x Kanban x Ambos */}
           {project && projectPage && (
             <div className="segmented segmented-sm">
