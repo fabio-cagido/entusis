@@ -19,6 +19,154 @@ export interface ParsedMindMap {
 }
 
 /**
+ * Garante um título único para o mapa importado aplicando sufixo incremental
+ * ("Hillo (2)", "Hillo (3)", ...) caso já exista um mapa ou projeto com o mesmo nome.
+ */
+export function resolveDuplicateMapTitle(
+  desiredTitle: string,
+  existingTitles: Iterable<string>,
+): string {
+  const base = (desiredTitle || "").trim() || "Mapa mental";
+  const taken = new Set<string>();
+  for (const t of existingTitles) {
+    const norm = (t || "").trim().toLowerCase();
+    if (norm) taken.add(norm);
+  }
+
+  if (!taken.has(base.toLowerCase())) {
+    return base;
+  }
+
+  // Remove sufixo numérico existente se houver (ex: "Hillo (2)" -> "Hillo")
+  const stem = base.replace(/\s*\(\d+\)\s*$/, "").trim() || base;
+  let counter = 2;
+  while (taken.has(`${stem} (${counter})`.toLowerCase())) {
+    counter++;
+  }
+  return `${stem} (${counter})`;
+}
+
+/**
+ * Clona um ParsedMindMap gerando novos UUIDs (crypto.randomUUID()) para a raiz,
+ * todos os nós, parent_id, scope_node_id, links, link_handles, anexos e arestas de submapa,
+ * garantindo uma nova instância 100% isolada no banco de dados.
+ */
+export function cloneMindMapWithFreshIds(
+  parsed: ParsedMindMap,
+  finalTitle: string,
+  currentUserId?: string | null,
+): ParsedMindMap {
+  const t = now();
+  const idMap = new Map<string, string>();
+  for (const n of parsed.nodes) {
+    idMap.set(n.id, uid());
+  }
+
+  const newRootId = idMap.get(parsed.root.id) ?? uid();
+  idMap.set(parsed.root.id, newRootId);
+
+  const clonedNodes: ItemNode[] = parsed.nodes.map((node) => {
+    const isRoot = node.id === parsed.root.id;
+    const newId = idMap.get(node.id)!;
+    const newParentId = isRoot
+      ? null
+      : node.parent_id
+      ? idMap.get(node.parent_id) ?? newRootId
+      : newRootId;
+    const newScopeNodeId = isRoot
+      ? null
+      : node.scope_node_id
+      ? idMap.get(node.scope_node_id) ?? null
+      : null;
+
+    const newLinks = (node.links ?? [])
+      .map((oldTargetId) => idMap.get(oldTargetId))
+      .filter((tid): tid is string => Boolean(tid && tid !== newId));
+
+    let newLinkHandles: Record<
+      string,
+      { sourceHandle?: string | null; targetHandle?: string | null }
+    > | null = null;
+    if (node.canvas?.link_handles) {
+      const entries: [
+        string,
+        { sourceHandle?: string | null; targetHandle?: string | null },
+      ][] = [];
+      for (const [oldTargetId, handles] of Object.entries(node.canvas.link_handles)) {
+        const mappedTarget = idMap.get(oldTargetId);
+        if (mappedTarget && handles) {
+          entries.push([mappedTarget, { ...handles }]);
+        }
+      }
+      if (entries.length > 0) {
+        newLinkHandles = Object.fromEntries(entries);
+      }
+    }
+
+    let newSubmapData = node.submap_canvas_data ?? null;
+    if (newSubmapData && Array.isArray(newSubmapData.nodes)) {
+      const subIdMap = new Map<string, string>();
+      for (const sn of newSubmapData.nodes) {
+        subIdMap.set(sn.id, uid());
+      }
+      newSubmapData = {
+        nodes: newSubmapData.nodes.map((sn) => ({
+          ...sn,
+          id: subIdMap.get(sn.id) ?? uid(),
+        })),
+        edges: (newSubmapData.edges ?? [])
+          .map((se) => {
+            const newSource = subIdMap.get(se.source);
+            const newTarget = subIdMap.get(se.target);
+            if (!newSource || !newTarget) return null;
+            return {
+              ...se,
+              id: uid(),
+              source: newSource,
+              target: newTarget,
+            };
+          })
+          .filter((se): se is NonNullable<typeof se> => se !== null),
+      };
+    }
+
+    return {
+      ...node,
+      id: newId,
+      title: isRoot ? finalTitle : node.title,
+      parent_id: newParentId,
+      scope_node_id: newScopeNodeId,
+      project_id: null,
+      deleted_at: null,
+      ...(currentUserId ? { user_id: currentUserId } : { user_id: undefined }),
+      links: Array.from(new Set(newLinks)),
+      attachments: (node.attachments ?? []).map((att) => ({
+        ...att,
+        id: uid(),
+      })),
+      canvas: node.canvas
+        ? {
+            ...node.canvas,
+            link_handles: newLinkHandles,
+            deleted_at: null,
+          }
+        : null,
+      submap_canvas_data: newSubmapData,
+      created_at: t,
+      updated_at: t,
+    };
+  });
+
+  const newRoot = clonedNodes.find((n) => n.id === newRootId)!;
+  return {
+    title: finalTitle,
+    root: newRoot,
+    nodes: clonedNodes,
+    summary: parsed.summary,
+  };
+}
+
+/**
  * Parses a mind map JSON from various tools, with dedicated support
  * for Lucidchart mind maps and generic hierarchical JSONs.
  */
@@ -550,6 +698,55 @@ function parseAyoliaExport(doc: any): ParsedMindMap {
     const isRoot = it.id === rootOrig.id;
     const newId = idMap.get(it.id)!;
     const remappedParent = it.parent_id ? idMap.get(it.parent_id) : null;
+    const remappedScope =
+      !isRoot && it.scope_node_id ? idMap.get(it.scope_node_id) ?? null : null;
+
+    let remappedLinkHandles: Record<
+      string,
+      { sourceHandle?: string | null; targetHandle?: string | null }
+    > | null = null;
+    if (it.canvas?.link_handles) {
+      const entries: [
+        string,
+        { sourceHandle?: string | null; targetHandle?: string | null },
+      ][] = [];
+      for (const [oldTargetId, handles] of Object.entries(it.canvas.link_handles)) {
+        const mappedTarget = idMap.get(oldTargetId);
+        if (mappedTarget && handles) {
+          entries.push([mappedTarget, { ...handles }]);
+        }
+      }
+      if (entries.length > 0) {
+        remappedLinkHandles = Object.fromEntries(entries);
+      }
+    }
+
+    let remappedSubmapData = it.submap_canvas_data ?? null;
+    if (remappedSubmapData && Array.isArray(remappedSubmapData.nodes)) {
+      const subIdMap = new Map<string, string>();
+      for (const sn of remappedSubmapData.nodes) {
+        subIdMap.set(sn.id, uid());
+      }
+      remappedSubmapData = {
+        nodes: remappedSubmapData.nodes.map((sn) => ({
+          ...sn,
+          id: subIdMap.get(sn.id) ?? uid(),
+        })),
+        edges: (remappedSubmapData.edges ?? [])
+          .map((se) => {
+            const newSource = subIdMap.get(se.source);
+            const newTarget = subIdMap.get(se.target);
+            if (!newSource || !newTarget) return null;
+            return {
+              ...se,
+              id: uid(),
+              source: newSource,
+              target: newTarget,
+            };
+          })
+          .filter((se): se is NonNullable<typeof se> => se !== null),
+      };
+    }
 
     return {
       ...it,
@@ -560,6 +757,11 @@ function parseAyoliaExport(doc: any): ParsedMindMap {
       type: it.type || (isRoot ? "PAGE" : "MINDMAP_NODE"),
       status: it.status ?? null,
       is_today: Boolean(it.is_today),
+      // Isola a nova instância: nunca reaproveita project_id nem user_id antigo
+      project_id: null,
+      user_id: undefined,
+      deleted_at: null,
+      scope_node_id: remappedScope,
       // Se for a raiz do mapa: parent_id = null
       // Se for nó de processo ou filho sem pai mapeado: associa à raiz do mapa para garantir exibição no canvas
       parent_id: isRoot ? null : remappedParent || rootId,
@@ -567,8 +769,12 @@ function parseAyoliaExport(doc: any): ParsedMindMap {
       sort_order: typeof it.sort_order === "number" ? it.sort_order : 0,
       // Links remapeados garantindo todas as conexões de setas de processos
       links: Array.from(linksMap.get(it.id) || []),
-      attachments: it.attachments ?? [],
+      attachments: (it.attachments ?? []).map((att) => ({
+        ...att,
+        id: uid(),
+      })),
       schedule: { ...(it.schedule ?? emptySchedule()), google_event_id: null },
+      submap_canvas_data: remappedSubmapData,
       // Preservação fiel de geometria, dimensões, forma de processo e cores
       canvas: it.canvas
         ? {
@@ -578,6 +784,7 @@ function parseAyoliaExport(doc: any): ParsedMindMap {
             shape: it.canvas.shape ?? null,
             width: it.canvas.width ? Number(it.canvas.width) : null,
             height: it.canvas.height ? Number(it.canvas.height) : null,
+            link_handles: remappedLinkHandles,
           }
         : null,
       created_at: t,

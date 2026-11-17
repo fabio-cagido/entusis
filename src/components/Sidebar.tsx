@@ -850,13 +850,34 @@ export default function Sidebar() {
     [roots, currentUserId]
   );
 
-  const mindMapsCount = useMemo(
-    () =>
-      Object.values(items).filter(
-        (i) => i.type === "PAGE" && i.default_view === "CANVAS" && i.parent_id === null
-      ).length,
-    [items]
-  );
+  const mindMapsCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const pr of Object.values(projects)) {
+      if (pr.is_archived) continue;
+      const rootItem =
+        (pr.page_id ? items[pr.page_id] : null) ??
+        Object.values(items).find(
+          (i) =>
+            !i.deleted_at &&
+            !i.parent_id &&
+            !i.scope_node_id &&
+            i.type === "PAGE" &&
+            i.project_id === pr.id,
+        );
+      if (rootItem && !rootItem.deleted_at) {
+        ids.add(rootItem.id);
+      }
+    }
+    for (const it of Object.values(items)) {
+      if (it.deleted_at || it.parent_id !== null || it.scope_node_id != null) continue;
+      const linkedProj = it.project_id ? projects[it.project_id] ?? null : null;
+      if (linkedProj?.is_archived) continue;
+      if (it.default_view === "CANVAS" || linkedProj) {
+        ids.add(it.id);
+      }
+    }
+    return ids.size;
+  }, [items, projects]);
 
   const nav = [
     { href: "/today", label: "Hoje", icon: <Sunrise size={16} />, id: "nav-today" },

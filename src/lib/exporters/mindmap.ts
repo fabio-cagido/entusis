@@ -75,6 +75,13 @@ export function buildMindMapExport(items: Record<string, ItemNode>, rootId: stri
             shape: n.canvas.shape ?? null,
             width: n.canvas.width ? Math.round(n.canvas.width) : null,
             height: n.canvas.height ? Math.round(n.canvas.height) : null,
+            ...(n.canvas.link_handles
+              ? {
+                  link_handles: Object.fromEntries(
+                    Object.entries(n.canvas.link_handles).filter(([targetId]) => allIds.has(targetId))
+                  ),
+                }
+              : {}),
           }
         : null,
     };

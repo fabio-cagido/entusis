@@ -15,7 +15,12 @@ import {
   FileText,
   Link2,
 } from "lucide-react";
-import { parseMindMapJson, ParsedMindMap } from "@/lib/importers/mindmap";
+import {
+  cloneMindMapWithFreshIds,
+  parseMindMapJson,
+  ParsedMindMap,
+  resolveDuplicateMapTitle,
+} from "@/lib/importers/mindmap";
 import { useStore } from "@/lib/store";
 
 interface ImportMindMapModalProps {
@@ -26,7 +31,24 @@ interface ImportMindMapModalProps {
 export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapModalProps) {
   const router = useRouter();
   const addItems = useStore((s) => s.addItems);
+  const items = useStore((s) => s.items);
   const projects = useStore((s) => s.projects);
+  const currentUserId = useStore((s) => s.currentUserId);
+
+  const getExistingMapTitles = (): string[] => {
+    const titles: string[] = [];
+    for (const it of Object.values(items)) {
+      if (!it.deleted_at && !it.parent_id && !it.scope_node_id && it.title) {
+        titles.push(it.title);
+      }
+    }
+    for (const pr of Object.values(projects)) {
+      if (pr.name) {
+        titles.push(pr.name);
+      }
+    }
+    return titles;
+  };
 
   const [activeTab, setActiveTab] = useState<"file" | "paste">("file");
   const [jsonText, setJsonText] = useState("");
@@ -68,8 +90,9 @@ export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapMod
     setError(null);
     try {
       const result = parseMindMapJson(content);
+      const uniqueTitle = resolveDuplicateMapTitle(result.title, getExistingMapTitles());
       setParsedMap(result);
-      setCustomTitle(result.title);
+      setCustomTitle(uniqueTitle);
       if (name) setFileName(name);
     } catch (err: any) {
       setParsedMap(null);
@@ -132,23 +155,22 @@ export default function ImportMindMapModal({ isOpen, onClose }: ImportMindMapMod
     setIsImporting(true);
 
     try {
-      const finalTitle = customTitle.trim() || parsedMap.title;
-      // Update root title if customized
-      const nodesToInsert = parsedMap.nodes.map((node) => {
-        // Keep project links only if that project exists in this account (FK safety).
-        const project_id = node.project_id && projects[node.project_id] ? node.project_id : null;
-        if (node.id === parsedMap.root.id) {
-          return { ...node, project_id, title: finalTitle };
-        }
-        return { ...node, project_id };
-      });
+      const desiredTitle = customTitle.trim() || parsedMap.title;
+      const finalTitle = resolveDuplicateMapTitle(desiredTitle, getExistingMapTitles());
+
+      // Gera uma nova instância 100% isolada com novos UUIDs para raiz, nós, parent_id, scope_node_id e conexões
+      const freshInstance = cloneMindMapWithFreshIds(
+        parsedMap,
+        finalTitle,
+        currentUserId,
+      );
 
       // Insert all nodes into the global store & wait for repository persistence
-      await addItems(nodesToInsert);
+      await addItems(freshInstance.nodes);
 
       // Close modal and navigate directly to canvas view
       onClose();
-      router.push(`/canvas/${parsedMap.root.id}`);
+      router.push(`/canvas/${freshInstance.root.id}`);
     } catch (err: any) {
       setError(`Erro ao salvar nós no banco: ${err?.message || err}`);
       setIsImporting(false);
