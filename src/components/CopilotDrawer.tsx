@@ -320,9 +320,9 @@ function CopilotDrawerInner() {
         accessToken = data.session?.access_token ?? null;
       }
 
-      const historyPayload = messages.map((m) => ({
+      const historyPayload = messages.slice(-4).map((m) => ({
         role: m.role,
-        content: m.content,
+        content: m.content.length > 1500 ? `${m.content.slice(0, 1500)}…` : m.content,
       }));
 
       const res = await fetch("/api/ai/chat", {
@@ -385,6 +385,15 @@ function CopilotDrawerInner() {
     setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 2000);
   };
 
+  const handleResetConversation = () => {
+    setMessages([]);
+    setError(null);
+    setLastSummary(null);
+    setCopiedId(null);
+    setInput("");
+    setTimeout(() => textareaRef.current?.focus(), 40);
+  };
+
   const activeScopeDescription =
     scope === "current" && detectedContext.hasSpecificTarget
       ? detectedContext.targetName
@@ -419,19 +428,23 @@ function CopilotDrawerInner() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {messages.length > 0 && (
-              <button
-                type="button"
-                className="icon-btn"
-                title="Limpar conversa"
-                onClick={() => {
-                  setMessages([]);
-                  setError(null);
-                }}
-              >
-                <RotateCcw size={15} />
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              title="Limpar histórico e iniciar nova conversa"
+              disabled={messages.length === 0 && !error && !lastSummary && !input}
+              onClick={handleResetConversation}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "5px 9px",
+                fontSize: "0.75rem",
+              }}
+            >
+              <RotateCcw size={13} />
+              <span>Nova conversa</span>
+            </button>
             <button
               type="button"
               className="icon-btn"

@@ -21,6 +21,7 @@ interface DbProjectRow {
   name: string;
   color: string;
   icon: string | null;
+  page_id?: string | null;
   sort_order: number;
   is_archived?: boolean;
 }
@@ -69,7 +70,7 @@ const STATUS_PT: Record<string, string> = {
   BACKLOG: "Brainstorming / Backlog",
   TODO: "A Fazer",
   DOING: "Fazendo (Em Andamento)",
-  DONE: "ConcluÃ­do",
+  DONE: "Concluído",
 };
 
 /**
@@ -79,7 +80,7 @@ function htmlToCleanText(html: string | null | undefined): string {
   if (!html) return "";
   let source = html;
 
-  // ConteÃºdo salvo como JSON estruturado (ex: TipTap/ProseMirror): extrai apenas o texto Ãºtil e links
+  // Conteúdo salvo como JSON estruturado (ex: TipTap/ProseMirror): extrai apenas o texto útil e links
   const trimmedSource = source.trim();
   if (trimmedSource.startsWith("{") && trimmedSource.includes('"type"')) {
     try {
@@ -138,7 +139,7 @@ function htmlToCleanText(html: string | null | undefined): string {
 }
 
 /**
- * Limpa o texto da pÃ¡gina do nÃ³ e aplica um limite de caracteres (orÃ§amento),
+ * Limpa o texto da página do nó e aplica um limite de caracteres (orçamento),
  * preservando sempre os links/URLs que ficariam fora do trecho cortado.
  */
 function formatNodeText(raw: string | null | undefined, cap: number): string {
@@ -151,7 +152,7 @@ function formatNodeText(raw: string | null | undefined, cap: number): string {
   }
   if (clean.length <= cap) return clean;
 
-  const clipped = `${clean.slice(0, cap).trimEnd()}â€¦`;
+  const clipped = `${clean.slice(0, cap).trimEnd()}…`;
   const missing = urls.filter((u) => !clipped.includes(u)).slice(0, 5);
   return missing.length > 0
     ? `${clipped}\n${missing.map((u) => `[Link]: ${u}`).join("\n")}`
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
     const groqApiKey = process.env.GROQ_API_KEY;
     if (!groqApiKey) {
       return NextResponse.json(
-        { error: "Chave GROQ_API_KEY nÃ£o configurada no servidor." },
+        { error: "Chave GROQ_API_KEY não configurada no servidor." },
         { status: 500 },
       );
     }
@@ -182,7 +183,7 @@ export async function POST(request: NextRequest) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json(
-        { error: "ConfiguraÃ§Ã£o do Supabase ausente no servidor." },
+        { error: "Configuração do Supabase ausente no servidor." },
         { status: 500 },
       );
     }
@@ -194,12 +195,12 @@ export async function POST(request: NextRequest) {
           return cookieStore.getAll();
         },
         setAll() {
-          // Somente leitura de sessÃ£o na rota de API
+          // Somente leitura de sessão na rota de API
         },
       },
     });
 
-    // Valida o usuÃ¡rio autenticado via cookies ou header Authorization Bearer
+    // Valida o usuário autenticado via cookies ou header Authorization Bearer
     let {
       data: { user },
     } = await supabase.auth.getUser();
@@ -217,7 +218,7 @@ export async function POST(request: NextRequest) {
 
     if (!user?.id) {
       return NextResponse.json(
-        { error: "UsuÃ¡rio nÃ£o autenticado. FaÃ§a login novamente." },
+        { error: "Usuário não autenticado. Faça login novamente." },
         { status: 401 },
       );
     }
@@ -226,7 +227,7 @@ export async function POST(request: NextRequest) {
     const userMessage = (body.message || "").trim();
     if (!userMessage) {
       return NextResponse.json(
-        { error: "A mensagem nÃ£o pode estar vazia." },
+        { error: "A mensagem não pode estar vazia." },
         { status: 400 },
       );
     }
@@ -266,7 +267,7 @@ export async function POST(request: NextRequest) {
       fetchAllUserRows<DbItemRow>("item_nodes"),
     ]);
 
-    // Filtra apenas itens ativos (nÃ£o movidos para a lixeira)
+    // Filtra apenas itens ativos (não movidos para a lixeira)
     const activeItems = rawItems.filter(
       (it) => !it.deleted_at && !it.canvas?.deleted_at,
     );
@@ -277,7 +278,7 @@ export async function POST(request: NextRequest) {
       allProjects.map((p) => [p.id, p]),
     );
 
-    // Ãndice de filhos por parent_id e submapas por scope_node_id
+    // Índice de filhos por parent_id e submapas por scope_node_id
     const childrenByParent = new Map<string, DbItemRow[]>();
     const submapByScopeNode = new Map<string, DbItemRow[]>();
 
@@ -299,7 +300,7 @@ export async function POST(request: NextRequest) {
       arr.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     }
 
-    // Coleta recursivamente todos os descendentes de um nÃ³ raiz
+    // Coleta recursivamente todos os descendentes de um nó raiz
     const collectSubtree = (rootId: string): DbItemRow[] => {
       const visited = new Set<string>([rootId]);
       const result: DbItemRow[] = [];
@@ -319,7 +320,7 @@ export async function POST(request: NextRequest) {
       return result;
     };
 
-    // Sobe atÃ© a raiz da Ã¡rvore caso requestedRootNodeId seja um sub-nÃ³
+    // Sobe até a raiz da árvore caso requestedRootNodeId seja um sub-nó
     const findTopRoot = (nodeId: string): DbItemRow | null => {
       let cur = itemsById.get(nodeId) ?? null;
       let guard = 0;
@@ -338,9 +339,174 @@ export async function POST(request: NextRequest) {
       return cur;
     };
 
-    // Determina quais raÃ­zes / projetos compÃµem o contexto solicitado
+    const normText = (s: string) =>
+      s
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+
+    const projectsByRootPageId = new Map<string, DbProjectRow>();
+    const projectsByNormName = new Map<string, DbProjectRow>();
+    for (const p of allProjects) {
+      if (p.page_id) projectsByRootPageId.set(p.page_id, p);
+      if (p.name) projectsByNormName.set(normText(p.name), p);
+    }
+
+    // Resolve o projeto ao qual qualquer nó/tarefa pertence (diretamente ou subindo pela árvore)
+    const resolveProjectForNode = (node: DbItemRow): DbProjectRow | null => {
+      if (node.project_id && projectsById.has(node.project_id)) {
+        return projectsById.get(node.project_id)!;
+      }
+      let cur: DbItemRow | undefined = node;
+      let guard = 0;
+      while (cur && guard++ < 100) {
+        if (cur.project_id && projectsById.has(cur.project_id)) {
+          return projectsById.get(cur.project_id)!;
+        }
+        if (projectsByRootPageId.has(cur.id)) {
+          return projectsByRootPageId.get(cur.id)!;
+        }
+        const nextId =
+          cur.parent_id ?? cur.scope_node_id ?? cur.canvas?.scope_node_id ?? null;
+        if (nextId && itemsById.has(nextId)) {
+          cur = itemsById.get(nextId);
+        } else {
+          break;
+        }
+      }
+      if (cur?.title) {
+        const byName = projectsByNormName.get(normText(cur.title));
+        if (byName) return byName;
+      }
+      return null;
+    };
+
+    // Detecta colunas estruturais do Kanban no mapa para não confundi-las com tarefas reais e para inferir status por coluna pai
+    const statusFromColumnTitle = (
+      title: string | null | undefined,
+    ): "BACKLOG" | "TODO" | "DOING" | "DONE" | null => {
+      const cleaned = normText(title || "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+      if (cleaned === "brainstorming" || cleaned === "brainstorm" || cleaned === "backlog") {
+        return "BACKLOG";
+      }
+      if (cleaned === "a fazer" || cleaned === "todo") return "TODO";
+      if (cleaned === "fazendo" || cleaned === "doing" || cleaned === "em andamento") {
+        return "DOING";
+      }
+      if (cleaned === "concluido" || cleaned === "concluidas" || cleaned === "done") {
+        return "DONE";
+      }
+      return null;
+    };
+
+    const isStructuralKanbanNode = (node: DbItemRow): boolean => {
+      const cleaned = normText(node.title || "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+      if (cleaned === "kanban" && node.status === null) return true;
+      if (statusFromColumnTitle(node.title) !== null && node.status === null) {
+        return true;
+      }
+      return false;
+    };
+
+    const getEffectiveStatus = (
+      node: DbItemRow,
+    ): "BACKLOG" | "TODO" | "DOING" | "DONE" | null => {
+      if (isStructuralKanbanNode(node)) return null;
+      if (node.status) return node.status;
+      if (node.parent_id && itemsById.has(node.parent_id)) {
+        const parent = itemsById.get(node.parent_id)!;
+        const colStatus = statusFromColumnTitle(parent.title);
+        if (colStatus) return colStatus;
+      }
+      return null;
+    };
+
+    const archivedProjectIds = new Set(
+      allProjects.filter((p) => p.is_archived).map((p) => p.id),
+    );
+
+    // 1. BLOCO PRIORITÁRIO DE TAREFAS ATIVAS (SEMPRE NO TOPO DO CONTEXTO)
+    const COMPACT_STATUS_LABEL: Record<string, string> = {
+      DOING: "Fazendo",
+      TODO: "A Fazer",
+      BACKLOG: "Backlog",
+    };
+
+    interface ActiveTaskEntry {
+      node: DbItemRow;
+      projectName: string;
+      status: "DOING" | "TODO" | "BACKLOG" | null;
+      isToday: boolean;
+    }
+
+    const globalActiveTasks: ActiveTaskEntry[] = [];
+    for (const it of activeItems) {
+      if (isStructuralKanbanNode(it)) continue;
+      const proj = resolveProjectForNode(it);
+      if (proj && archivedProjectIds.has(proj.id)) continue;
+
+      const effStatus = getEffectiveStatus(it);
+      if (effStatus === "DONE") continue;
+      if (effStatus === null && !it.is_today) continue;
+
+      const topRoot = findTopRoot(it.id);
+      const projectName =
+        proj?.name || topRoot?.title || "Sem Projeto";
+
+      globalActiveTasks.push({
+        node: it,
+        projectName,
+        status: effStatus,
+        isToday: Boolean(it.is_today),
+      });
+    }
+
+    const statusRank = (entry: ActiveTaskEntry): number => {
+      if (entry.status === "DOING") return 0;
+      if (entry.isToday) return 1;
+      if (entry.status === "TODO") return 2;
+      return 3;
+    };
+
+    globalActiveTasks.sort((a, b) => {
+      const rDiff = statusRank(a) - statusRank(b);
+      if (rDiff !== 0) return rDiff;
+      return a.projectName.localeCompare(b.projectName, "pt-BR");
+    });
+
+    const doingCount = globalActiveTasks.filter((t) => t.status === "DOING").length;
+    const todayCount = globalActiveTasks.filter((t) => t.isToday).length;
+    const todoCount = globalActiveTasks.filter((t) => t.status === "TODO").length;
+    const backlogCount = globalActiveTasks.filter((t) => t.status === "BACKLOG").length;
+
+    const globalTasksLines: string[] = [
+      `## RESUMO GLOBAL DE TAREFAS ATIVAS (TODOS OS PROJETOS)`,
+      `Total: ${globalActiveTasks.length} tarefas não concluídas (${doingCount} Fazendo | ${todayCount} Em foco hoje | ${todoCount} A Fazer | ${backlogCount} Backlog)`,
+    ];
+
+    if (globalActiveTasks.length === 0) {
+      globalTasksLines.push(`- Nenhuma tarefa ativa pendente no momento.`);
+    } else {
+      for (const entry of globalActiveTasks) {
+        const stLabel = entry.status
+          ? COMPACT_STATUS_LABEL[entry.status] || entry.status
+          : "Em Foco (Agenda/Hoje)";
+        const dateSuffix = entry.node.start_time
+          ? ` | Data: ${entry.node.start_time.slice(0, 10)}`
+          : "";
+        globalTasksLines.push(
+          `- [${entry.projectName}] ${entry.node.title || "Sem título"} | Status: ${stLabel} | Em foco: ${entry.isToday ? "Sim" : "Não"}${dateSuffix}`,
+        );
+      }
+    }
+
+    const priorityTasksBlock = globalTasksLines.join("\n");
+
+    // 2. EXPANSÃO CONTEXTUAL INTELIGENTE (ÁRVORE E PÁGINAS)
     let targetRoots: DbItemRow[] = [];
     let scopeLabel = "Todos os Projetos e Mapas Ativos";
+    let hasSpecificProjectFocus = false;
 
     if (scope === "current" && (requestedRootNodeId || requestedProjectId)) {
       const rootSet = new Map<string, DbItemRow>();
@@ -353,8 +519,8 @@ export async function POST(request: NextRequest) {
         const directNode = itemsById.get(requestedRootNodeId)!;
         if (topRoot) {
           rootSet.set(topRoot.id, topRoot);
-          if (!resolvedProject && topRoot.project_id) {
-            resolvedProject = projectsById.get(topRoot.project_id) ?? null;
+          if (!resolvedProject) {
+            resolvedProject = resolveProjectForNode(topRoot);
           }
         } else {
           rootSet.set(directNode.id, directNode);
@@ -371,40 +537,38 @@ export async function POST(request: NextRequest) {
             rootSet.set(it.id, it);
           }
         }
+        if (resolvedProject.page_id && itemsById.has(resolvedProject.page_id)) {
+          rootSet.set(
+            resolvedProject.page_id,
+            itemsById.get(resolvedProject.page_id)!,
+          );
+        }
         scopeLabel = `Projeto: ${resolvedProject.name}`;
       } else if (rootSet.size > 0) {
         const firstRoot = Array.from(rootSet.values())[0];
-        scopeLabel = `Mapa/PÃ¡gina: ${firstRoot.title || "Sem tÃ­tulo"}`;
+        scopeLabel = `Mapa/Página: ${firstRoot.title || "Sem título"}`;
       }
 
       targetRoots = Array.from(rootSet.values());
+      if (targetRoots.length > 0) {
+        hasSpecificProjectFocus = true;
+      }
     }
 
-    // Se scope === 'all' ou se nÃ£o havia projeto/mapa especÃ­fico aberto na rota atual:
-    let otherProjectsSummaryLine = "";
     if (targetRoots.length === 0) {
-      const archivedProjectIds = new Set(
-        allProjects.filter((p) => p.is_archived).map((p) => p.id),
-      );
       const allCandidateRoots = activeItems.filter((it) => {
         const scopeId = it.scope_node_id ?? it.canvas?.scope_node_id ?? null;
         if (it.parent_id || scopeId) return false;
-        if (it.project_id && archivedProjectIds.has(it.project_id)) return false;
+        const proj = resolveProjectForNode(it);
+        if (proj && archivedProjectIds.has(proj.id)) return false;
         return true;
       });
 
-      const normText = (s: string) =>
-        s
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .trim();
-
       const msgNorm = normText(userMessage);
 
-      // Verifica se a mensagem do usuÃ¡rio menciona algum projeto ou mapa especÃ­fico (ex: "Hillo", "Audima", "Ayolia")
+      // Verifica se a mensagem do usuário cita o nome de algum projeto específico (case-insensitive)
       const matchedRoots = allCandidateRoots.filter((r) => {
-        const proj = r.project_id ? projectsById.get(r.project_id) : null;
+        const proj = resolveProjectForNode(r);
         const rTitle = normText(r.title || "");
         const pTitle = proj ? normText(proj.name || "") : "";
         return (
@@ -415,42 +579,30 @@ export async function POST(request: NextRequest) {
 
       if (matchedRoots.length > 0) {
         targetRoots = matchedRoots;
+        hasSpecificProjectFocus = true;
         const matchedNames = matchedRoots.map((r) => {
-          const p = r.project_id ? projectsById.get(r.project_id) : null;
-          return p?.name || r.title || "Sem tÃ­tulo";
+          const p = resolveProjectForNode(r);
+          return p?.name || r.title || "Sem título";
         });
-        const otherNames = allCandidateRoots
-          .filter((r) => !matchedRoots.some((m) => m.id === r.id))
-          .map((r) => {
-            const p = r.project_id ? projectsById.get(r.project_id) : null;
-            return p?.name || r.title || "Sem tÃ­tulo";
-          });
-        scopeLabel = `Foco detectado: ${matchedNames.join(", ")}`;
-        if (otherNames.length > 0) {
-          otherProjectsSummaryLine = `\n\n### Demais Projetos/Mapas Ativos na Conta (visÃ£o geral de nomes):\n${Array.from(new Set(otherNames)).join(", ")}`;
-        }
+        scopeLabel = `Foco no Projeto: ${Array.from(new Set(matchedNames)).join(", ")}`;
       } else {
         targetRoots = allCandidateRoots;
+        hasSpecificProjectFocus = false;
         scopeLabel = "Todos os Projetos e Mapas Ativos";
       }
     }
 
-    // 2. SerializaÃ§Ã£o em Markdown Estruturado para o LLM
+    // 3. Serialização em Markdown Estruturado para o LLM
     let totalNodesSerialized = 0;
-    let totalTasksSerialized = 0;
+    const totalTasksSerialized = globalActiveTasks.length;
     let totalCustomLinksSerialized = 0;
-    const buildContext = (noteCap: number): string => {
-    totalNodesSerialized = 0;
-    totalTasksSerialized = 0;
-    totalCustomLinksSerialized = 0;
-    const contextSections: string[] = [];
 
     const getBranchPath = (node: DbItemRow, rootId: string): string => {
       const parts: string[] = [];
       let cur: DbItemRow | undefined = node;
       let guard = 0;
       while (cur && guard++ < 50) {
-        parts.unshift(cur.title || "Sem tÃ­tulo");
+        parts.unshift(cur.title || "Sem título");
         if (cur.id === rootId) break;
         const nextParentId: string | null =
           cur.parent_id ||
@@ -462,188 +614,229 @@ export async function POST(request: NextRequest) {
       return parts.join(" > ");
     };
 
-    for (const rootNode of targetRoots) {
-      const proj = rootNode.project_id
-        ? projectsById.get(rootNode.project_id) ?? null
-        : null;
-      const subtree = collectSubtree(rootNode.id);
-      const allMapNodes = [rootNode, ...subtree];
+    const buildDetailedProjectContext = (noteCap: number): string => {
+      totalNodesSerialized = 0;
+      totalCustomLinksSerialized = 0;
+      const contextSections: string[] = [priorityTasksBlock];
 
-      // Inclui tambÃ©m nÃ³s que tenham project_id igual ao projeto mas estejam Ã³rfÃ£os
-      if (proj) {
-        const inSet = new Set(allMapNodes.map((n) => n.id));
-        for (const it of activeItems) {
-          if (it.project_id === proj.id && !inSet.has(it.id)) {
-            allMapNodes.push(it);
-            inSet.add(it.id);
-          }
-        }
-      }
+      for (const rootNode of targetRoots) {
+        const proj = resolveProjectForNode(rootNode);
+        const subtree = collectSubtree(rootNode.id);
+        const allMapNodes = [rootNode, ...subtree];
 
-      totalNodesSerialized += allMapNodes.length;
-
-      const lines: string[] = [];
-      const headerTitle = proj
-        ? `PROJETO: "${proj.name}" (Mapa Raiz: "${rootNode.title || proj.name}")`
-        : `MAPA MENTAL / PÃGINA: "${rootNode.title || "Sem tÃ­tulo"}"`;
-
-      lines.push(`## ${headerTitle}`);
-
-      const rootCleanContent = formatNodeText(rootNode.content, noteCap * 2);
-      if (rootCleanContent) {
-        lines.push(`### Documento / VisÃ£o Geral da Raiz:`);
-        lines.push(rootCleanContent);
-      }
-
-      const rootAtt = formatAttachments(rootNode.attachments);
-      if (rootAtt) {
-        lines.push(`Links/Anexos da Raiz: ${rootAtt}`);
-      }
-
-      // RenderizaÃ§Ã£o recursiva da Ã¡rvore hierÃ¡rquica (Pai -> Filho)
-      lines.push(`### Estrutura HierÃ¡rquica do Mapa Mental (Ãrvore Pai -> Filho):`);
-
-      const visitedRender = new Set<string>([rootNode.id]);
-      const renderTree = (parentId: string, depth: number) => {
-        const kids = childrenByParent.get(parentId) ?? [];
-        const scopedKids = submapByScopeNode.get(parentId) ?? [];
-        const combined = [...kids, ...scopedKids.filter((s) => !kids.some((k) => k.id === s.id))];
-
-        for (const child of combined) {
-          if (visitedRender.has(child.id)) continue;
-          visitedRender.add(child.id);
-
-          const indent = "  ".repeat(depth);
-          const metaTags: string[] = [];
-          if (child.canvas?.shape) metaTags.push(`Fluxo: ${child.canvas.shape}`);
-          if (child.status) metaTags.push(`Status Kanban: ${STATUS_PT[child.status] || child.status}`);
-          if (child.is_today) metaTags.push(`Foco de Hoje`);
-          if (child.is_recurring) metaTags.push(`Recorrente (${child.recurrence_type || "ativo"})`);
-          if (child.start_time) metaTags.push(`Prazo/Agenda: ${child.start_time.slice(0, 10)}`);
-
-          const metaSuffix = metaTags.length > 0 ? ` [${metaTags.join(" | ")}]` : "";
-          const iconPrefix = child.icon ? `${child.icon} ` : "";
-          lines.push(
-            `${indent}- **${iconPrefix}${child.title || "Sem tÃ­tulo"}**${metaSuffix}`,
-          );
-
-          const cleanNote = formatNodeText(child.content, noteCap);
-          if (cleanNote) {
-            const indentedNote = cleanNote
-              .split("\n")
-              .map((l) => `${indent}  > ${l}`)
-              .join("\n");
-            lines.push(indentedNote);
-          }
-
-          const attLine = formatAttachments(child.attachments);
-          if (attLine) {
-            lines.push(`${indent}  > ${attLine}`);
-          }
-
-          const subCanvas =
-            child.submap_canvas_data ?? child.canvas?.submap_canvas_data ?? null;
-          if (subCanvas?.nodes && subCanvas.nodes.length > 0) {
-            const subLabels = subCanvas.nodes
-              .map((sn) => sn.data?.label)
-              .filter(Boolean);
-            if (subLabels.length > 0) {
-              lines.push(
-                `${indent}  > Submapa de Processo: ${subLabels.join(" -> ")}`,
-              );
+        if (proj) {
+          const inSet = new Set(allMapNodes.map((n) => n.id));
+          for (const it of activeItems) {
+            if (it.project_id === proj.id && !inSet.has(it.id)) {
+              allMapNodes.push(it);
+              inSet.add(it.id);
             }
           }
-
-          renderTree(child.id, depth + 1);
         }
-      };
 
-      renderTree(rootNode.id, 0);
+        totalNodesSerialized += allMapNodes.length;
 
-      // ConexÃµes Livres / Arestas Tracejadas Laranjas (links transversais entre nÃ³s)
-      const customConnections: string[] = [];
-      for (const n of allMapNodes) {
-        if (!Array.isArray(n.links) || n.links.length === 0) continue;
-        for (const targetId of n.links) {
-          const targetNode = itemsById.get(targetId);
-          if (!targetNode) continue;
-          totalCustomLinksSerialized++;
-          const fromPath = getBranchPath(n, rootNode.id);
-          const toPath = getBranchPath(targetNode, rootNode.id);
-          customConnections.push(`- **${fromPath}** â”€â”€(conexÃ£o direta)â”€â”€> **${toPath}**`);
+        const lines: string[] = [];
+        const headerTitle = proj
+          ? `PROJETO: "${proj.name}" (Mapa Raiz: "${rootNode.title || proj.name}")`
+          : `MAPA MENTAL / PÁGINA: "${rootNode.title || "Sem título"}"`;
+
+        lines.push(`## ${headerTitle}`);
+
+        const rootCleanContent = formatNodeText(rootNode.content, noteCap * 2);
+        if (rootCleanContent) {
+          lines.push(`### Documento / Visão Geral da Raiz:`);
+          lines.push(rootCleanContent);
         }
-      }
 
-      if (customConnections.length > 0) {
-        lines.push(`### ConexÃµes Livres e DependÃªncias Transversais (Linhas Laranjas):`);
-        lines.push(...customConnections);
-      }
+        const rootAtt = formatAttachments(rootNode.attachments);
+        if (rootAtt) {
+          lines.push(`Links/Anexos da Raiz: ${rootAtt}`);
+        }
 
-      // Resumo de Tarefas / Kanban do Projeto ou Mapa
-      const taskNodes = allMapNodes.filter((n) => n.status !== null);
-      totalTasksSerialized += taskNodes.length;
-      if (taskNodes.length > 0) {
-        lines.push(`### Quadro Kanban / Tarefas Vinculadas (${taskNodes.length}):`);
-        for (const st of ["DOING", "TODO", "BACKLOG", "DONE"] as const) {
-          const group = taskNodes.filter((t) => t.status === st);
-          if (group.length === 0) continue;
-          lines.push(`- **${STATUS_PT[st]} (${group.length}):**`);
-          for (const tk of group) {
-            const note = formatNodeText(tk.content, Math.min(noteCap, 300));
-            const noteInline = note ? ` â€” Nota: "${note.replace(/\n+/g, " ")}"` : "";
-            const todayFlag = tk.is_today ? " [FOCO HOJE]" : "";
-            lines.push(`  - ${tk.title || "Sem tÃ­tulo"}${todayFlag}${noteInline}`);
+        lines.push(`### Estrutura Hierárquica Completa do Mapa (Árvore Pai -> Filho):`);
+
+        const visitedRender = new Set<string>([rootNode.id]);
+        const renderTree = (parentId: string, depth: number) => {
+          const kids = childrenByParent.get(parentId) ?? [];
+          const scopedKids = submapByScopeNode.get(parentId) ?? [];
+          const combined = [
+            ...kids,
+            ...scopedKids.filter((s) => !kids.some((k) => k.id === s.id)),
+          ];
+
+          for (const child of combined) {
+            if (visitedRender.has(child.id)) continue;
+            visitedRender.add(child.id);
+
+            const indent = "  ".repeat(depth);
+            const metaTags: string[] = [];
+            const effSt = getEffectiveStatus(child);
+            if (child.canvas?.shape) metaTags.push(`Fluxo: ${child.canvas.shape}`);
+            if (effSt) {
+              metaTags.push(`Status Kanban: ${STATUS_PT[effSt] || effSt}`);
+            }
+            if (child.is_today) metaTags.push(`Foco de Hoje`);
+            if (child.is_recurring) {
+              metaTags.push(`Recorrente (${child.recurrence_type || "ativo"})`);
+            }
+            if (child.start_time) {
+              metaTags.push(`Prazo/Agenda: ${child.start_time.slice(0, 10)}`);
+            }
+
+            const metaSuffix = metaTags.length > 0 ? ` [${metaTags.join(" | ")}]` : "";
+            const iconPrefix = child.icon ? `${child.icon} ` : "";
+            lines.push(
+              `${indent}- **${iconPrefix}${child.title || "Sem título"}**${metaSuffix}`,
+            );
+
+            const cleanNote = formatNodeText(child.content, noteCap);
+            if (cleanNote) {
+              const indentedNote = cleanNote
+                .split("\n")
+                .map((l) => `${indent}  > ${l}`)
+                .join("\n");
+              lines.push(indentedNote);
+            }
+
+            const attLine = formatAttachments(child.attachments);
+            if (attLine) {
+              lines.push(`${indent}  > ${attLine}`);
+            }
+
+            const subCanvas =
+              child.submap_canvas_data ?? child.canvas?.submap_canvas_data ?? null;
+            if (subCanvas?.nodes && subCanvas.nodes.length > 0) {
+              const subLabels = subCanvas.nodes
+                .map((sn) => sn.data?.label)
+                .filter(Boolean);
+              if (subLabels.length > 0) {
+                lines.push(
+                  `${indent}  > Submapa de Processo: ${subLabels.join(" -> ")}`,
+                );
+              }
+            }
+
+            renderTree(child.id, depth + 1);
+          }
+        };
+
+        renderTree(rootNode.id, 0);
+
+        const customConnections: string[] = [];
+        for (const n of allMapNodes) {
+          if (!Array.isArray(n.links) || n.links.length === 0) continue;
+          for (const targetId of n.links) {
+            const targetNode = itemsById.get(targetId);
+            if (!targetNode) continue;
+            totalCustomLinksSerialized++;
+            const fromPath = getBranchPath(n, rootNode.id);
+            const toPath = getBranchPath(targetNode, rootNode.id);
+            customConnections.push(`- **${fromPath}** ──(conexão direta)──> **${toPath}**`);
           }
         }
+
+        if (customConnections.length > 0) {
+          lines.push(`### Conexões Livres e Dependências Transversais (Linhas Laranjas):`);
+          lines.push(...customConnections);
+        }
+
+        contextSections.push(lines.join("\n"));
       }
 
-      contextSections.push(lines.join("\n"));
-    }
-
-    return (
-      (contextSections.length > 0
-        ? contextSections.join("\n\n---\n\n")
-        : "Nenhum mapa mental ou projeto encontrado neste escopo.") +
-      otherProjectsSummaryLine
-    );
+      return contextSections.join("\n\n---\n\n");
     };
 
-    // OrÃ§amento inteligente de contexto (~18.000 caracteres / ~5.000 tokens) para nunca exceder o limite de 8.000 TPM da Groq.
-    // Prioriza manter TODA a estrutura + links, reduzindo progressivamente o tamanho das notas/transcriÃ§Ãµes por nÃ³ atÃ© caber.
-    const maxContextChars = 18000;
-    const noteCaps = [6000, 3000, 1500, 800, 400, 200, 0];
-    let fullContextMarkdown = "";
-    for (const cap of noteCaps) {
-      fullContextMarkdown = buildContext(cap);
-      if (fullContextMarkdown.length <= maxContextChars) break;
+    const buildGlobalOverviewContext = (): string => {
+      totalNodesSerialized = 0;
+      totalCustomLinksSerialized = 0;
+      const overviewLines: string[] = [
+        priorityTasksBlock,
+        `## ESTRUTURA GERAL DOS PROJETOS E MAPAS ATIVOS (NÍVEIS 1 E 2)`,
+      ];
+
+      for (const rootNode of targetRoots) {
+        const proj = resolveProjectForNode(rootNode);
+        const subtree = collectSubtree(rootNode.id);
+        totalNodesSerialized += 1 + subtree.length;
+
+        const rootLabel = proj
+          ? `Projeto: **${proj.name}** (Raiz: "${rootNode.title || proj.name}")`
+          : `Mapa/Página: **${rootNode.title || "Sem título"}**`;
+        overviewLines.push(`\n### ${rootLabel}`);
+
+        const level1Kids = [
+          ...(childrenByParent.get(rootNode.id) ?? []),
+          ...(submapByScopeNode.get(rootNode.id) ?? []),
+        ].filter((n, idx, arr) => arr.findIndex((x) => x.id === n.id) === idx);
+
+        if (level1Kids.length === 0) {
+          overviewLines.push(`- (Sem sub-ramos cadastrados)`);
+          continue;
+        }
+
+        for (const l1 of level1Kids) {
+          if (isStructuralKanbanNode(l1)) continue;
+          const l1Kids = [
+            ...(childrenByParent.get(l1.id) ?? []),
+            ...(submapByScopeNode.get(l1.id) ?? []),
+          ]
+            .filter((n, idx, arr) => arr.findIndex((x) => x.id === n.id) === idx)
+            .filter((n) => !isStructuralKanbanNode(n));
+
+          const l2Titles = l1Kids
+            .slice(0, 12)
+            .map((l2) => l2.title || "Sem título");
+          const l2Suffix =
+            l2Titles.length > 0
+              ? `: ${l2Titles.join(", ")}${l1Kids.length > 12 ? "…" : ""}`
+              : "";
+          overviewLines.push(`- **${l1.title || "Sem título"}**${l2Suffix}`);
+        }
+      }
+
+      return overviewLines.join("\n");
+    };
+
+    // Orçamento estrito de contexto: máximo de 12.000 caracteres (~3.000 a 3.500 tokens)
+    const maxContextChars = 12000;
+    let contextText = "";
+
+    if (hasSpecificProjectFocus) {
+      const noteCaps = [4000, 2000, 1000, 500, 250, 120, 0];
+      for (const cap of noteCaps) {
+        contextText = buildDetailedProjectContext(cap);
+        if (contextText.length <= maxContextChars) break;
+      }
+    } else {
+      contextText = buildGlobalOverviewContext();
     }
-    const boundedContext =
-      fullContextMarkdown.length > maxContextChars
-        ? `${fullContextMarkdown.slice(0, maxContextChars)}\n\n[...contexto truncado em 18.000 caracteres para respeitar o limite de tokens da API...]`
-        : fullContextMarkdown;
 
-    const systemPrompt = `VocÃª Ã© o **Ayo**, a inteligÃªncia artificial nativa da plataforma Ayolia â€” um parceiro sÃªnior de consultoria estratÃ©gica e gestÃ£o de projetos que trabalha lado a lado com o consultor.
+    const boundedContext = contextText.slice(0, 12000);
 
-QUEM VOCÃŠ Ã‰ E COMO CONVERSA:
-- Seu nome Ã© **Ayo**. Apresente-se assim apenas se perguntarem quem vocÃª Ã©.
-- Fale em PortuguÃªs (Brasil), de forma natural, direta e humana, como um colega experiente de consultoria â€” nunca como um relatÃ³rio automÃ¡tico.
-- **Proporcionalidade Ã© a regra de ouro:** responda no tamanho da pergunta.
-  - Perguntas simples de checagem ou abertura (ex: "Consegue ver o mapa da Hillo?", "EstÃ¡ vendo esse projeto?", "Oi"): responda em NO MÃXIMO 2 a 3 frases curtas, confirmando naturalmente que estÃ¡ com o mapa aberto (cite sÃ³ 1 ou 2 elementos-chave para provar que leu, como um setor ou uma conexÃ£o) e pergunte como pode ajudar. Exemplo de tom: "Sim, jÃ¡ estou com o mapa da Hillo aberto aqui, incluindo os levantamentos dos setores e as conexÃµes entre as Ã¡reas. Esse Ã© um cliente que estamos diagnosticando agora? Como vocÃª quer avanÃ§ar: preparar a prÃ³xima reuniÃ£o ou analisar algum setor especÃ­fico?"
-  - NUNCA despeje tabelas gigantes, listas longas ou o mapa inteiro sem que o usuÃ¡rio peÃ§a.
-  - SÃ³ entregue anÃ¡lises profundas, listas detalhadas, pautas ou planos de aÃ§Ã£o quando o usuÃ¡rio pedir explicitamente (ex: "Sugira uma pauta", "Analise os gargalos", "Resuma as reuniÃµes"). Nesses casos, use Markdown claro (tÃ­tulos \`###\`, tÃ³picos, **negrito**) e seja objetivo.
+    const systemPrompt = `Você é o **Ayo**, a inteligência artificial nativa da plataforma Ayolia — um parceiro sênior de consultoria estratégica e gestão de projetos que trabalha lado a lado com o consultor.
+
+QUEM VOCÊ É E COMO CONVERSA:
+- Seu nome é **Ayo**. Apresente-se assim apenas se perguntarem quem você é.
+- Fale em Português (Brasil), de forma natural, direta e humana, como um colega experiente de consultoria — nunca como um relatório automático.
+- **Proporcionalidade é a regra de ouro:** responda no tamanho da pergunta.
+  - Perguntas simples de checagem ou abertura (ex: "Consegue ver o mapa da Hillo?", "Está vendo esse projeto?", "Oi"): responda em NO MÁXIMO 2 a 3 frases curtas, confirmando naturalmente que está com o mapa aberto (cite só 1 ou 2 elementos-chave para provar que leu, como um setor ou uma conexão) e pergunte como pode ajudar. Exemplo de tom: "Sim, já estou com o mapa da Hillo aberto aqui, incluindo os levantamentos dos setores e as conexões entre as áreas. Esse é um cliente que estamos diagnosticando agora? Como você quer avançar: preparar a próxima reunião ou analisar algum setor específico?"
+  - NUNCA despeje tabelas gigantes, listas longas ou o mapa inteiro sem que o usuário peça.
+  - Só entregue análises profundas, listas detalhadas, pautas ou planos de ação quando o usuário pedir explicitamente (ex: "Sugira uma pauta", "Analise os gargalos", "Resuma as reuniões"). Nesses casos, use Markdown claro (títulos \`###\`, tópicos, **negrito**) e seja objetivo.
 
 COMO USAR OS DADOS:
-1. **Fidelidade estrita:** baseie-se RIGOROSAMENTE nos fatos, ramos, setores, pessoas, textos/atas/transcriÃ§Ãµes das pÃ¡ginas, links, conexÃµes transversais (linhas laranjas) e tarefas do Kanban presentes no CONTEXTO abaixo. Nunca invente fatos. Se algo nÃ£o estÃ¡ no contexto, diga com naturalidade que nÃ£o encontrou no mapa.
-2. **Cite pelo nome** os ramos e setores relevantes (ex: Comercial, Fiscal, Contexto) quando a resposta for analÃ­tica.
-3. **Leia o conteÃºdo das pÃ¡ginas:** o texto dentro de cada nÃ³ (atas, transcriÃ§Ãµes, notas) e os links marcados como \`[Link]: URL\` fazem parte do contexto. Quando o usuÃ¡rio perguntar sobre um link ou documento, use o que estiver registrado (tÃ­tulo, nota e URL). VocÃª nÃ£o consegue abrir o conteÃºdo externo de uma URL â€” se for pedido, diga isso e use apenas o que estÃ¡ anotado no nÃ³.
-4. Preste atenÃ§Ã£o Ã s conexÃµes livres entre ramos e Ã s notas: elas revelam dependÃªncias, dores e retrabalhos.
+1. **Fidelidade estrita:** baseie-se RIGOROSAMENTE nos fatos, ramos, setores, pessoas, textos/atas/transcrições das páginas, links, conexões transversais (linhas laranjas) e tarefas do Kanban presentes no CONTEXTO abaixo. Nunca invente fatos. Se algo não está no contexto, diga com naturalidade que não encontrou no mapa.
+2. **Cite pelo nome** os ramos e setores relevantes (ex: Comercial, Fiscal, Contexto) quando a resposta for analítica.
+3. **Leia o conteúdo das páginas:** o texto dentro de cada nó (atas, transcrições, notas) e os links marcados como \`[Link]: URL\` fazem parte do contexto. Quando o usuário perguntar sobre um link ou documento, use o que estiver registrado (título, nota e URL). Você não consegue abrir o conteúdo externo de uma URL — se for pedido, diga isso e use apenas o que está anotado no nó.
+4. Preste atenção às conexões livres entre ramos e às notas: elas revelam dependências, dores e retrabalhos.
 
 === ESCOPO ATUAL: ${scopeLabel} ===
 === DADOS DO(S) PROJETO(S) E MAPA(S) MENTAL(IS) ===
 ${boundedContext}
 === FIM DOS DADOS ===`;
 
-    const sanitizedHistory: ChatMessageInput[] = Array.isArray(body.history)
+    // Histórico limitado às últimas 4 mensagens, truncando mensagens longas a no máximo 1.500 caracteres cada
+    const history: ChatMessageInput[] = Array.isArray(body.history)
       ? body.history
           .filter(
             (m) =>
@@ -652,26 +845,25 @@ ${boundedContext}
               typeof m.content === "string" &&
               m.content.trim().length > 0,
           )
-          .slice(-6)
+          .slice(-4)
           .map((m) => ({
             role: m.role,
-            content: m.content.slice(0, 2000),
+            content:
+              m.content.length > 1500
+                ? `${m.content.slice(0, 1500)}…`
+                : m.content,
           }))
       : [];
 
     const groqMessages = [
       { role: "system" as const, content: systemPrompt },
-      ...sanitizedHistory,
+      ...history,
       { role: "user" as const, content: userMessage },
     ];
 
     const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-    const candidateModels = [
-      "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant",
-      "meta-llama/llama-4-scout-17b-16e-instruct",
-      "openai/gpt-oss-120b",
-    ];
+    const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models";
+    const PRIMARY_MODEL = "llama-3.3-70b-versatile";
 
     const callGroqWithModel = async (modelName: string) => {
       const res = await fetch(GROQ_CHAT_URL, {
@@ -684,100 +876,115 @@ ${boundedContext}
           model: modelName,
           messages: groqMessages,
           temperature: 0.35,
-          max_tokens: 1500,
+          max_tokens: 1200,
         }),
       });
       if (res.ok) {
-        return { ok: true as const, status: res.status, data: await res.json(), errText: "" };
+        return {
+          ok: true as const,
+          status: res.status,
+          data: (await res.json()) as {
+            choices?: { message?: { content?: string } }[];
+          },
+          errText: "",
+        };
       }
       const errText = await res.text();
       return { ok: false as const, status: res.status, data: null, errText };
     };
 
-    let lastStatus = 500;
-    let lastErrText = "";
-    let groqData: { choices?: { message?: { content?: string } }[] } | null = null;
+    let attempt = await callGroqWithModel(PRIMARY_MODEL);
 
-    for (const modelName of candidateModels) {
-      const attempt = await callGroqWithModel(modelName);
-      if (attempt.ok) {
-        groqData = attempt.data as { choices?: { message?: { content?: string } }[] };
-        break;
-      }
-      lastStatus = attempt.status;
-      lastErrText = attempt.errText;
-      console.warn(
-        `[api/ai/chat] Modelo "${modelName}" retornou HTTP ${attempt.status}:`,
-        attempt.errText,
-      );
-      // Continua para o fallback se for 404, 413 (TPM), 429 (rate limit), model_not_found ou model_decommissioned
-      if (
-        attempt.status !== 404 &&
-        attempt.status !== 413 &&
-        attempt.status !== 429 &&
-        !attempt.errText.includes("model_not_found") &&
-        !attempt.errText.includes("model_decommissioned") &&
-        !attempt.errText.includes("rate_limit_exceeded")
-      ) {
-        break;
-      }
-    }
-
-    // Se todos os modelos candidatos retornarem 404/model_not_found, descobre automaticamente um modelo ativo na conta via /openai/v1/models
     if (
-      !groqData &&
-      (lastStatus === 404 ||
-        lastErrText.includes("model_not_found") ||
-        lastErrText.includes("model_decommissioned"))
+      !attempt.ok &&
+      (attempt.status === 404 ||
+        attempt.status === 413 ||
+        attempt.status === 429 ||
+        attempt.errText.includes("model_not_found") ||
+        attempt.errText.includes("model_decommissioned") ||
+        attempt.errText.includes("rate_limit_exceeded"))
     ) {
+      console.warn(
+        `[api/ai/chat] Modelo principal "${PRIMARY_MODEL}" retornou HTTP ${attempt.status}. Consultando modelos ativos em ${GROQ_MODELS_URL}...`,
+      );
       try {
-        const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
-          headers: { Authorization: `Bearer ${groqApiKey}` },
+        const modelsRes = await fetch(GROQ_MODELS_URL, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${groqApiKey}`,
+          },
         });
+
         if (modelsRes.ok) {
-          const modelsJson = (await modelsRes.json()) as {
+          const modelsPayload = (await modelsRes.json()) as {
             data?: { id: string; active?: boolean }[];
           };
-          const availableChatModel = (modelsJson.data ?? [])
+
+          const availableChatModels = (modelsPayload.data ?? [])
+            .filter((m) => m && typeof m.id === "string" && m.active !== false)
             .map((m) => m.id)
-            .find(
-              (id) =>
-                !id.includes("whisper") &&
-                !id.includes("tts") &&
-                !id.includes("guard") &&
-                !id.includes("embed") &&
-                !candidateModels.includes(id),
-            );
-          if (availableChatModel) {
-            const fallbackAttempt = await callGroqWithModel(availableChatModel);
-            if (fallbackAttempt.ok) {
-              groqData = fallbackAttempt.data as {
-                choices?: { message?: { content?: string } }[];
+            .filter((id) => {
+              const lower = id.toLowerCase();
+              return (
+                id !== PRIMARY_MODEL &&
+                !lower.includes("whisper") &&
+                !lower.includes("guard") &&
+                !lower.includes("safeguard") &&
+                !lower.includes("tts") &&
+                !lower.includes("orpheus") &&
+                !lower.includes("playai") &&
+                !lower.includes("embed")
+              );
+            })
+            .sort((a, b) => {
+              const score = (id: string) => {
+                const lower = id.toLowerCase();
+                if (lower.includes("llama")) return 0;
+                if (lower.includes("qwen")) return 1;
+                return 2;
               };
-            } else {
-              lastStatus = fallbackAttempt.status;
-              lastErrText = fallbackAttempt.errText;
+              return score(a) - score(b);
+            });
+
+          for (const dynamicModel of availableChatModels) {
+            const dynamicAttempt = await callGroqWithModel(dynamicModel);
+            attempt = dynamicAttempt;
+            if (dynamicAttempt.ok) {
+              break;
+            }
+            if (
+              dynamicAttempt.status !== 404 &&
+              dynamicAttempt.status !== 413 &&
+              dynamicAttempt.status !== 429 &&
+              !dynamicAttempt.errText.includes("model_not_found") &&
+              !dynamicAttempt.errText.includes("rate_limit_exceeded")
+            ) {
+              break;
             }
           }
         }
       } catch (modelsErr) {
-        console.warn("[api/ai/chat] Falha ao consultar /openai/v1/models:", modelsErr);
+        console.warn("[api/ai/chat] Erro ao consultar lista dinâmica de modelos:", modelsErr);
       }
     }
 
-    if (!groqData) {
-      console.error("[api/ai/chat] Erro final na API Groq:", lastStatus, lastErrText);
+    if (!attempt.ok || !attempt.data) {
+      console.error(
+        "[api/ai/chat] Erro final na API Groq:",
+        attempt.status,
+        attempt.errText,
+      );
       return NextResponse.json(
         {
-          error: `Erro ao consultar a API da Groq (${lastStatus}): ${lastErrText}`,
+          error: `Erro ao consultar a API da Groq (${attempt.status}): ${attempt.errText}`,
         },
         { status: 502 },
       );
     }
 
     const reply =
-      groqData.choices?.[0]?.message?.content?.trim() ||
-      "NÃ£o foi possÃ­vel gerar uma resposta para esta solicitaÃ§Ã£o.";
+      attempt.data.choices?.[0]?.message?.content?.trim() ||
+      "Não foi possível gerar uma resposta para esta solicitação.";
 
     return NextResponse.json({
       reply,
